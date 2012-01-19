@@ -1,4 +1,6 @@
-from datetime import date, time, datetime
+import datetime
+import random
+
 from django.conf import settings
 from django.db.models.fields import NOT_PROVIDED
 from django.db.models.sql import aggregates as sqlaggregates
@@ -7,7 +9,7 @@ from django.db.models.sql.constants import LOOKUP_SEP, MULTI, SINGLE
 from django.db.models.sql.where import AND, OR
 from django.db.utils import DatabaseError, IntegrityError
 from django.utils.tree import Node
-import random
+
 
 EMULATED_OPS = {
     'exact': lambda x, y: y in x if isinstance(x, (list,tuple)) else x == y,
@@ -21,6 +23,7 @@ EMULATED_OPS = {
     'gt': lambda x, y: x > y,
     'gte': lambda x, y: x >= y,
 }
+
 
 class NonrelQuery(object):
     # ----------------------------------------------
@@ -166,7 +169,7 @@ class NonrelQuery(object):
                         value = value[0]
 
                 if entity[column] is None:
-                    if isinstance(value, (datetime, date, time)):
+                    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
                         submatch = lookup_type in ('lt', 'lte')
                     elif lookup_type in ('startswith', 'contains', 'endswith', 'iexact',
                                          'istartswith', 'icontains', 'iendswith'):
@@ -201,6 +204,7 @@ class NonrelQuery(object):
 
     def convert_value_for_db(self, db_type, value):
         return self.compiler.convert_value_for_db(db_type, value)
+
 
 class NonrelCompiler(SQLCompiler):
     """
@@ -255,7 +259,8 @@ class NonrelCompiler(SQLCompiler):
             if value is NOT_PROVIDED:
                 value = field.get_default()
             else:
-                value = self.convert_value_from_db(field.db_type(connection=self.connection), value)
+                value = self.convert_value_from_db(
+                    field.db_type(connection=self.connection), value)
             if value is None and not field.null:
                 raise IntegrityError("Non-nullable field %s can't be None!" % field.name)
             result.append(value)
@@ -342,6 +347,47 @@ class NonrelCompiler(SQLCompiler):
                 descending = not descending
             yield (opts.get_field(field).column, descending)
 
+    def convert_value_for_db(self, db_type, value):
+        """
+        Converts a standard Python value to a type that can be stored
+        by the database.
+
+        There are some other ways to convert values for the database in
+        Django (BaseDatabaseOperations.value_to_db_* / convert_values),
+        but there are some problems with them:
+        -- there are no methods for string / integer conversion or for
+           nonrel specific fields (e.g. iterables, blobs);
+        -- some conversions are not specific to a field kind and can't
+           rely on field internal_type (e.g. key conversions);
+        -- some standard fields do not call value_to_db_* for each
+           operation (e.g. DecimalField only defines get_db_value_save,
+           so the conversion is not applied to lookup values).
+        Nevertheless standard methods should be preferred.
+
+        TODO: Handle AbstractIterableFields here (e.g. let them use
+        'list:subtype' as db_type, and convert elements of all values
+        using this type.
+
+        TODO: This should belong to DatabaseOperations.
+
+        :param db_type: Database type that should be used.
+        :param value: Python value to convert.
+        """
+        raise NotImplementedError
+
+    def convert_value_from_db(self, db_type, value):
+        """
+        Converts a database type to a standard Python type.
+
+        You need to define all deconversion routines for standard fields here,
+        because Field.to_python is not called automatically for them.
+
+        :param db_type: Database type of the value.
+        :param value: Database value to convert.
+        """
+        raise NotImplementedError
+
+
 class NonrelInsertCompiler(object):
     def execute_sql(self, return_id=False):
         data = {}
@@ -349,9 +395,9 @@ class NonrelInsertCompiler(object):
             if field is not None:
                 if not field.null and value is None:
                     raise IntegrityError("You can't set %s (a non-nullable "
-                                        "field) to None!" % field.name)
-                db_type = field.db_type(connection=self.connection)
-                value = self.convert_value_for_db(db_type, value)
+                                         "field) to None!" % field.name)
+                value = self.convert_value_for_db(
+                    field.db_type(connection=self.connection), value)
             data[column] = value
         return self.insert(data, return_id=return_id)
 
@@ -362,6 +408,7 @@ class NonrelInsertCompiler(object):
         """
         raise NotImplementedError
 
+
 class NonrelUpdateCompiler(object):
     def execute_sql(self, result_type):
         values = []
@@ -371,9 +418,7 @@ class NonrelUpdateCompiler(object):
             else:
                 value = field.get_db_prep_save(value, connection=self.connection)
             value = self.convert_value_for_db(
-                field.db_type(connection=self.connection),
-                value
-            )
+                field.db_type(connection=self.connection), value)
             values.append((field, value))
         return self.update(values)
 
@@ -382,6 +427,7 @@ class NonrelUpdateCompiler(object):
         :param values: A list of (field, new-value) pairs
         """
         raise NotImplementedError
+
 
 class NonrelDeleteCompiler(object):
     def execute_sql(self, result_type=MULTI):
