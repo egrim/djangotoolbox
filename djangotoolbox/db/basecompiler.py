@@ -2,7 +2,7 @@ import datetime
 import random
 
 from django.conf import settings
-from django.db.models.fields import NOT_PROVIDED
+from django.db.models.fields import NOT_PROVIDED, DecimalField
 from django.db.models.sql import aggregates as sqlaggregates
 from django.db.models.sql.compiler import SQLCompiler
 from django.db.models.sql.constants import LOOKUP_SEP, MULTI, SINGLE
@@ -94,6 +94,15 @@ class NonrelQuery(object):
             raise DatabaseError("This database doesn't support JOINs "
                                 "and multi-table inheritance.")
         value = self._normalize_lookup_value(value, annotation, lookup_type)
+
+        # Workaround for Django only defining get_db_prep_save, rather
+        # than get_db_prep_value, causing DatabaseOperations.value_to_db_decimal
+        # not to be applied for lookups. TODO: Should be removed if it changes.
+        field = constraint.field
+        if isinstance(field, DecimalField):
+            value = self.connection.ops.value_to_db_decimal(
+                field.to_python(value), field.max_digits, field.decimal_places)
+
         return column, lookup_type, db_type, value
 
     def _normalize_lookup_value(self, value, annotation, lookup_type):
