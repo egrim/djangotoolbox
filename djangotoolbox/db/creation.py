@@ -2,11 +2,9 @@ from django.db.backends.creation import BaseDatabaseCreation
 
 
 class NonrelDatabaseCreation(BaseDatabaseCreation):
-    # This dictionary maps Field objects to back-end types that should
-    # be used to store their values. Type strings can contain format
-    # strings; they'll be interpolated against the values of
-    # Field.__dict__ before being output. If a type is set to
-    # None, it won't be included in the output.
+    # These "types" are used by back-end conversion routines to decide
+    # how to convert data for or from the database. Type is here an
+    # identifier of an encoding / decoding procedure to use.
     data_types = {
 
         # NoSQL databases usually have specific concepts of keys. For
