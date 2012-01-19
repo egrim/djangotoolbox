@@ -116,6 +116,19 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         return [datetime.datetime(value, 1, 1, 0, 0, 0, 0),
                 datetime.datetime(value+1, 1, 1, 0, 0, 0, 0)]
 
+    def convert_values(self, value, field):
+        """
+        Does no conversion, assuming that values returned by the
+        database are standard Python types suitable to be passed to
+        fields. Parent casts values meant for Integer and Auto fields
+        to int and every other value to float here.
+
+        TODO: This method is not even called by the currently existing
+        back-ends, however it should be, so conversion/deconversion may
+        be done in a symmetric manner.
+        """
+        return value
+
     def check_aggregate_support(self, aggregate):
         """
         Defaults to supporting only count.
