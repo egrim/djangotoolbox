@@ -26,6 +26,13 @@ EMULATED_OPS = {
 
 
 class NonrelQuery(object):
+    """
+    Base class for nonrel queries. Provides in-memory filtering and
+    ordering and a framework for converting SQL constraint tree built
+    by Django to a representation more suitable for most nonrel
+    databases.
+    """
+
     # ----------------------------------------------
     # Public API
     # ----------------------------------------------
@@ -48,8 +55,11 @@ class NonrelQuery(object):
     def order_by(self, ordering):
         raise NotImplementedError('Not implemented')
 
-    # Used by add_filters()
     def add_filter(self, column, lookup_type, negated, db_type, value):
+        """
+        Adds a single constraint to the query. Called by add_filters for
+        each constraint in the WHERE tree built by Django.
+        """
         raise NotImplementedError('Not implemented')
 
     def add_filters(self, filters):
@@ -115,15 +125,9 @@ class NonrelQuery(object):
         """
         Undoes preparations done by Field.get_db_prep_lookup
         inconvenient for nonrel back-ends.
-        """
 
-        # Workaround for Django only defining get_db_prep_save, rather
-        # than get_db_prep_value, causing DatabaseOperations.value_to_db_decimal
-        # not to be applied for lookups.
-        # TODO: Should be removed if it changes.
-        if isinstance(field, DecimalField):
-            value = self.connection.ops.value_to_db_decimal(
-                field.to_python(value), field.max_digits, field.decimal_places)
+        TODO: Move to DatabaseOperations too?
+        """
 
         # Undo Field.get_db_prep_lookup putting most values in a list.
         if lookup_type not in ('in', 'range', 'year') and \
@@ -156,13 +160,23 @@ class NonrelQuery(object):
         elif lookup_type in ('contains', 'icontains'):
             value = value[1:-1]
 
+        # Workaround for Django only defining get_db_prep_save, rather
+        # than get_db_prep_value, causing DatabaseOperations.value_to_db_decimal
+        # not to be applied for lookups.
+        # TODO: Should be removed if it changes.
+        if isinstance(field, DecimalField):
+            value = self.connection.ops.value_to_db_decimal(
+                field.to_python(value), field.max_digits, field.decimal_places)
+
         return value
 
     def _get_children(self, children):
         """
-        Filter out nodes that were automatically added by sql.Query,
-        but are not necessary with emulated negation handling code.
+        Filters out WHERE tree nodes not needed for nonrel queries.
         """
+
+        # Filter out nodes that were automatically added by sql.Query,
+        # but are not necessary with emulated negation handling code.
         result = []
         for child in children:
             if isinstance(child, tuple):
@@ -244,9 +258,7 @@ class NonrelQuery(object):
 
 class NonrelCompiler(SQLCompiler):
     """
-    Base class for non-relational compilers. Provides in-memory filter matching
-    and ordering. Entities are assumed to be dictionaries where the keys are
-    column names.
+    Base class for non-relational compilers.
     """
 
     # ----------------------------------------------
@@ -331,7 +343,8 @@ class NonrelCompiler(SQLCompiler):
 
     def get_fields(self):
         """
-        Returns the fields which should get loaded from the backend by self.query
+        Returns the fields which should get loaded from the back-end by
+        self.query
         """
         # We only set this up here because
         # related_select_fields isn't populated until
@@ -409,19 +422,55 @@ class NonrelCompiler(SQLCompiler):
         :param db_type: Database type that should be used.
         :param value: Python value to convert.
         """
-        raise NotImplementedError
+
+        # Convert all values in a list or set using its subtype.
+        if db_type.startswith(('ListField:', 'SetField:')):
+
+            # Note that value for a list field lookup may be an iterable
+            # list element, that should be converted as a single value.
+            # TODO: What about looking up a list in a list of lists?
+            if isinstance(value, (list, tuple, set)):
+                db_subtype = db_type.split(':', 1)[1]
+                value = [self.convert_value_for_db(db_subtype, subvalue)
+                         for subvalue in value]
+
+        # Convert dict values, pickle and store it as a Blob.
+        # TODO: Only values, not keys?
+        elif db_type.startswith('DictField:'):
+            if isinstance(value, dict):
+                db_subtype = db_type.split(':', 1)[1]
+                value = dict([(key, self.convert_value_for_db(db_subtype, value[key]))
+                              for key in value])
+
+        return value
 
     def convert_value_from_db(self, db_type, value):
         """
         Converts a database type to a standard Python type.
 
-        You need to define all deconversion routines for standard fields here,
-        because Field.to_python is not called automatically for them.
+        If you encoded a value for storage in the database, reverse the
+        encoding here. This implementation only provides reference
+        implementations for nonrel fields (ListField, SetField etc.).
 
-        :param db_type: Database type of the value.
-        :param value: Database value to convert.
+        :param db_type: Encoding / decoding procedure identifier.
+        :param value: A value received from the database.
         """
-        raise NotImplementedError
+
+        # Deconvert each value in a list, return a set for the set type.
+        if db_type.startswith(('ListField:', 'SetField:')):
+            db_subtype = db_type.split(':', 1)[1]
+            value = [self.convert_value_from_db(db_subtype, subvalue)
+                     for subvalue in value]
+            if db_type.startswith('SetField:'):
+                value = set(value)
+
+        # Deconvert all dictionary values.
+        elif db_type.startswith('DictField:'):
+            db_subtype = db_type.split(':', 1)[1]
+            value = dict((key, self.convert_value_from_db(db_subtype, value[key]))
+                          for key in value)
+
+        return value
 
 
 class NonrelInsertCompiler(object):
