@@ -396,6 +396,19 @@ class NonrelCompiler(SQLCompiler):
                 descending = not descending
             yield (opts.get_field(field).column, descending)
 
+    def _parse_db_type(self, db_type):
+        """
+        Separates elements of db_type into a tuple. Used for separating
+        subtype of iterable fields.
+
+        TODO: Do this in NonrelDatabaseCreation instead?
+        """
+        try:
+            db_type, db_subtype = db_type.split(':', 1)
+        except ValueError:
+            db_subtype = None
+        return db_type, db_subtype
+
     def convert_value_for_db(self, db_type, value):
         """
         Converts a standard Python value to a type that can be stored
@@ -419,28 +432,29 @@ class NonrelCompiler(SQLCompiler):
 
         TODO: This should belong to DatabaseOperations.
 
-        :param db_type: Database type that should be used.
-        :param value: Python value to convert.
+        :param db_type: Database type or encoding that should be used.
+        :param value: Value to convert.
         """
 
+        db_type, db_subtype = self._parse_db_type(db_type)
+
         # Convert all values in a list or set using its subtype.
-        if db_type.startswith(('ListField:', 'SetField:')):
+        # We store both as lists on default.
+        if db_type == 'ListField' or db_type == 'SetField':
 
             # Note that value for a list field lookup may be an iterable
             # list element, that should be converted as a single value.
             # TODO: What about looking up a list in a list of lists?
             if isinstance(value, (list, tuple, set)):
-                db_subtype = db_type.split(':', 1)[1]
                 value = [self.convert_value_for_db(db_subtype, subvalue)
                          for subvalue in value]
 
         # Convert dict values, pickle and store it as a Blob.
         # TODO: Only values, not keys?
-        elif db_type.startswith('DictField:'):
+        elif db_type == 'DictField':
             if isinstance(value, dict):
-                db_subtype = db_type.split(':', 1)[1]
-                value = dict([(key, self.convert_value_for_db(db_subtype, value[key]))
-                              for key in value])
+                value = dict((key, self.convert_value_for_db(db_subtype, subvalue))
+                              for key, subvalue in value.iteritems())
 
         return value
 
@@ -456,19 +470,23 @@ class NonrelCompiler(SQLCompiler):
         :param value: A value received from the database.
         """
 
+        db_type, db_subtype = self._parse_db_type(db_type)
+
         # Deconvert each value in a list, return a set for the set type.
-        if db_type.startswith(('ListField:', 'SetField:')):
-            db_subtype = db_type.split(':', 1)[1]
+        if db_type == 'ListField' or db_type == 'SetField':
             value = [self.convert_value_from_db(db_subtype, subvalue)
                      for subvalue in value]
-            if db_type.startswith('SetField:'):
+            if db_type == 'SetField':
                 value = set(value)
 
-        # Deconvert all dictionary values.
-        elif db_type.startswith('DictField:'):
-            db_subtype = db_type.split(':', 1)[1]
-            value = dict((key, self.convert_value_from_db(db_subtype, value[key]))
-                          for key in value)
+        # We may have encoded dict values, so now decode them.
+        elif db_type == 'DictField':
+            value = dict((key, self.convert_value_from_db(db_subtype, subvalue))
+                          for key, subvalue in value.iteritems())
+
+        # Call standard convert_values method, so queries don't
+        # remember about this. TODO
+#        value = self.connection.ops.convert_value(value, field)
 
         return value
 
