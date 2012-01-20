@@ -301,6 +301,14 @@ class NonrelCompiler(SQLCompiler):
     # Additional NonrelCompiler API
     # ----------------------------------------------
     def _make_result(self, entity, fields):
+        """
+        Gets and decodes values for the given fields and returns them
+        in a list.
+
+        The entity is assumed to be a dict using field database column
+        names as keys. Decodes values using convert_value_from_db as
+        well as the standard convert_values.
+        """
         result = []
         for field in fields:
             value = entity.get(field.column, NOT_PROVIDED)
@@ -309,8 +317,10 @@ class NonrelCompiler(SQLCompiler):
             else:
                 value = self.convert_value_from_db(
                     field.db_type(connection=self.connection), value)
+                value = self.connection.ops.convert_values(value, field)
             if value is None and not field.null:
-                raise IntegrityError("Non-nullable field %s can't be None!" % field.name)
+                raise IntegrityError("Non-nullable field %s can't be None!"
+                                     % field.name)
             result.append(value)
         return result
 
@@ -344,7 +354,7 @@ class NonrelCompiler(SQLCompiler):
     def get_fields(self):
         """
         Returns the fields which should get loaded from the back-end by
-        self.query
+        the query.
         """
         # We only set this up here because
         # related_select_fields isn't populated until
@@ -483,10 +493,6 @@ class NonrelCompiler(SQLCompiler):
         elif db_type == 'DictField':
             value = dict((key, self.convert_value_from_db(db_subtype, subvalue))
                           for key, subvalue in value.iteritems())
-
-        # Call standard convert_values method, so queries don't
-        # remember about this. TODO
-#        value = self.connection.ops.convert_value(value, field)
 
         return value
 

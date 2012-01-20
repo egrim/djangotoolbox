@@ -124,10 +124,6 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         database are standard Python types suitable to be passed to
         fields. Parent casts values meant for Integer and Auto fields
         to int and every other value to float here.
-
-        TODO: This method is not even called by the currently existing
-        back-ends, however it should be, so conversion/deconversion may
-        be done in a symmetric manner.
         """
         return value
 
