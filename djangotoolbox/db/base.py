@@ -70,6 +70,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         supporting string based AutoFields.
 
         TODO: features.has_key_type sounds better.
+        TODO: Returning value without conversion here would make
+              int/string keys work for GAE.
         """
         if self.connection.features.string_based_auto_field:
             if value is None:

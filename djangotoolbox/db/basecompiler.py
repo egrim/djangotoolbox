@@ -52,17 +52,22 @@ class NonrelQuery(object):
     def add_filter(self, column, lookup_type, negated, db_type, value):
         raise NotImplementedError('Not implemented')
 
-    # This is just a default implementation. You might want to override this
-    # in case your backend supports OR queries
     def add_filters(self, filters):
-        """Traverses the given Where tree and adds the filters to this query"""
+        """
+        Converts a constraint tree (sql.where.WhereNode) created by
+        Django's SQL query machinery to nonrel style filters, calling
+        add_filter for each of them.
+
+        This assumes the database doesn't support alternatives of
+        constraints, you should override this method if it does.
+        """
         if filters.negated:
             self._negated = not self._negated
 
         if not self._negated and filters.connector != AND:
-            raise DatabaseError('Only AND filters are supported')
+            raise DatabaseError('Only AND filters are supported.')
 
-        # Remove unneeded children from tree
+        # Remove unneeded children from the tree.
         children = self._get_children(filters.children)
 
         if self._negated and filters.connector != OR and len(children) > 1:
@@ -72,6 +77,8 @@ class NonrelQuery(object):
                                 "backend can convert them like this: "
                                 '"not (a OR b) => (not a) AND (not b)".')
 
+        # Recuresively call the method for tree nodes, add a filter for
+        # each leaf.
         for child in children:
             if isinstance(child, Node):
                 self.add_filters(child)
@@ -87,28 +94,41 @@ class NonrelQuery(object):
     # Internal API for reuse by subclasses
     # ----------------------------------------------
     def _decode_child(self, child):
+        """
+        Produces arguments suitable for add_filter from a single WHERE
+        tree leaf.
+        """
         constraint, lookup_type, annotation, value = child
         packed, value = constraint.process(lookup_type, value, self.connection)
         alias, column, db_type = packed
+
         if alias and alias != self.query.model._meta.db_table:
             raise DatabaseError("This database doesn't support JOINs "
                                 "and multi-table inheritance.")
-        value = self._normalize_lookup_value(value, annotation, lookup_type)
+
+        value = self._normalize_lookup_value(
+            value, annotation, lookup_type, constraint.field)
+
+        return column, lookup_type, db_type, value
+
+    def _normalize_lookup_value(self, value, annotation, lookup_type, field):
+        """
+        Undoes preparations done by Field.get_db_prep_lookup
+        inconvenient for nonrel back-ends.
+        """
 
         # Workaround for Django only defining get_db_prep_save, rather
         # than get_db_prep_value, causing DatabaseOperations.value_to_db_decimal
-        # not to be applied for lookups. TODO: Should be removed if it changes.
-        field = constraint.field
+        # not to be applied for lookups.
+        # TODO: Should be removed if it changes.
         if isinstance(field, DecimalField):
             value = self.connection.ops.value_to_db_decimal(
                 field.to_python(value), field.max_digits, field.decimal_places)
 
-        return column, lookup_type, db_type, value
+        # Undo Field.get_db_prep_lookup putting most values in a list.
+        if lookup_type not in ('in', 'range', 'year') and \
+            isinstance(value, (tuple, list)):
 
-    def _normalize_lookup_value(self, value, annotation, lookup_type):
-        # Django fields always return a list (see Field.get_db_prep_lookup)
-        # except if get_db_prep_lookup got overridden by a subclass
-        if lookup_type not in ('in', 'range', 'year') and isinstance(value, (tuple, list)):
             if len(value) > 1:
                 raise DatabaseError('Filter lookup type was: %s. Expected the '
                                 'filters value not to be a list. Only "in"-filters '
@@ -119,11 +139,16 @@ class NonrelQuery(object):
             else:
                 value = value[0]
 
+        # Handle lazy strings.
+        # TODO: Test and better explanation is needed; if this is needed
+        # should be moved to convert_value_for_db.
         if isinstance(value, unicode):
             value = unicode(value)
         elif isinstance(value, str):
             value = str(value)
 
+        # Remove percents added by Field.get_db_prep_lookup (useful
+        # if one were to use the value in a LIKE expression).
         if lookup_type in ('startswith', 'istartswith'):
             value = value[:-1]
         elif lookup_type in ('endswith', 'iendswith'):
@@ -134,8 +159,10 @@ class NonrelQuery(object):
         return value
 
     def _get_children(self, children):
-        # Filter out nodes that were automatically added by sql.Query, but are
-        # not necessary with emulated negation handling code
+        """
+        Filter out nodes that were automatically added by sql.Query,
+        but are not necessary with emulated negation handling code.
+        """
         result = []
         for child in children:
             if isinstance(child, tuple):
