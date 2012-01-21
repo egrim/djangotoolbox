@@ -1,4 +1,3 @@
-from .fields import ListField, SetField, DictField, EmbeddedModelField
 from django.db import models, connections
 from django.db.models import Q
 from django.db.models.signals import post_save
@@ -7,12 +6,20 @@ from django.dispatch.dispatcher import receiver
 from django.test import TestCase
 from django.utils import unittest
 
+from .fields import ListField, SetField, DictField, EmbeddedModelField
+
+
 def count_calls(func):
     def wrapper(*args, **kwargs):
         wrapper.calls += 1
         return func(*args, **kwargs)
     wrapper.calls = 0
     return wrapper
+
+
+# We will skip some tests if the database can't store dicts.
+supports_dicts = getattr(connections['default'].features, 'supports_dicts', False)
+
 
 class Target(models.Model):
     index = models.IntegerField()
@@ -36,27 +43,11 @@ class OrderedListModel(models.Model):
 class SetModel(models.Model):
     setfield = SetField(models.IntegerField())
 
-supports_dicts = getattr(connections['default'].features, 'supports_dicts', False)
 if supports_dicts:
     class DictModel(models.Model):
         dictfield = DictField(models.IntegerField)
         dictfield_nullable = DictField(null=True)
         auto_now = DictField(models.DateTimeField(auto_now=True))
-
-    class EmbeddedModelFieldModel(models.Model):
-        simple = EmbeddedModelField('EmbeddedModel', null=True)
-        simple_untyped = EmbeddedModelField(null=True)
-        typed_list = ListField(EmbeddedModelField('SetModel'))
-        typed_list2 = ListField(EmbeddedModelField('EmbeddedModel'))
-        untyped_list = ListField(EmbeddedModelField())
-        untyped_dict = DictField(EmbeddedModelField())
-        ordered_list = ListField(EmbeddedModelField(), ordering=lambda obj: obj.index)
-
-    class EmbeddedModel(models.Model):
-        some_relation = models.ForeignKey(DictModel, null=True)
-        someint = models.IntegerField(db_column='custom')
-        auto_now = models.DateTimeField(auto_now=True)
-        auto_now_add = models.DateTimeField(auto_now_add=True)
 
 class FilterTest(TestCase):
     floats = [5.3, 2.6, 9.1, 1.58]
@@ -208,6 +199,7 @@ class FilterTest(TestCase):
             ListModel.objects.exclude(Q(names__lt='Sakura') | Q(names__gte='Sasuke'))],
                 [['Kakashi', 'Naruto', 'Sasuke', 'Sakura']])
 
+
 class BaseModel(models.Model):
     pass
 
@@ -229,9 +221,26 @@ class ProxyTest(TestCase):
     def test_proxy_with_inheritance(self):
         self.assertRaises(DatabaseError, lambda: list(ExtendedModelProxy.objects.all()))
 
+
+if supports_dicts:
+    class EmbeddedModelFieldModel(models.Model):
+        simple = EmbeddedModelField('EmbeddedModel', null=True)
+        simple_untyped = EmbeddedModelField(null=True)
+        typed_list = ListField(EmbeddedModelField('SetModel'))
+        typed_list2 = ListField(EmbeddedModelField('EmbeddedModel'))
+        untyped_list = ListField(EmbeddedModelField())
+        untyped_dict = DictField(EmbeddedModelField())
+        ordered_list = ListField(EmbeddedModelField(), ordering=lambda obj: obj.index)
+
+    class EmbeddedModel(models.Model):
+        some_relation = models.ForeignKey(DictModel, null=True)
+        someint = models.IntegerField(db_column='custom')
+        auto_now = models.DateTimeField(auto_now=True)
+        auto_now_add = models.DateTimeField(auto_now_add=True)
+
 class EmbeddedModelFieldTest(TestCase):
     def assertEqualDatetime(self, d1, d2):
-        """ Compares d1 and d2, ignoring microseconds """
+        """Compares d1 and d2, ignoring microseconds."""
         self.assertEqual(d1.replace(microsecond=0), d2.replace(microsecond=0))
 
     def assertNotEqualDatetime(self, d1, d2):
@@ -383,6 +392,7 @@ class SignalTest(TestCase):
         list(qs.select_related())[0].save()
         self.assertEqual(created, [True, False, False, False, False])
 
+
 class SelectRelatedTest(TestCase):
     def test_select_related(self):
         target = Target(index=5)
@@ -394,6 +404,7 @@ class SelectRelatedTest(TestCase):
         source = Source.objects.all().select_related('target')[0]
         self.assertEqual(source.target.pk, target.pk)
         self.assertEqual(source.target.index, target.index)
+
 
 class OrderByTest(TestCase):
     def test_foreign_keys(self):
@@ -419,3 +430,26 @@ class OrderByTest(TestCase):
         model2 = DBColumn.objects.create(a=2)
         self.assertEqual(list(DBColumn.objects.all().order_by('a').reverse()), [model2, model1])
         self.assertEqual(list(DBColumn.objects.all().order_by('-a').reverse()), [model1, model2])
+
+
+class LazyObjectsTest(TestCase):
+    def test_translation(self):
+        """
+         Using a lazy translation call should work just the same as
+        a non-lazy one (or a plain string).
+        """
+        from django.utils.translation import ugettext_lazy
+        class String(models.Model):
+            s = models.CharField(max_length=20)
+        a = String.objects.create(s='a')
+        b = String.objects.create(s=ugettext_lazy('b'))
+        self.assertEqual(String.objects.get(s='a'), a)
+        self.assertEqual(list(String.objects.filter(s='a')), [a])
+        self.assertEqual(list(String.objects.filter(s__lte='a')), [a])
+        self.assertEqual(String.objects.get(s=ugettext_lazy('a')), a)
+        self.assertEqual(list(String.objects.filter(s__lte=ugettext_lazy('a'))), [a])
+        self.assertEqual(String.objects.get(s='b'), b)
+        self.assertEqual(list(String.objects.filter(s='b')), [b])
+        self.assertEqual(list(String.objects.filter(s__gte='b')), [b])
+        self.assertEqual(String.objects.get(s=ugettext_lazy('b')), b)
+        self.assertEqual(list(String.objects.filter(s__gte=ugettext_lazy('b'))), [b])

@@ -129,9 +129,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
     def check_aggregate_support(self, aggregate):
         """
-        Defaults to supporting only count.
-
-        TODO: Rather GAE specific, move.
+        NonrelQueries are only expected to implement COUNT.
         """
         from django.db.models.sql.aggregates import Count
         if not isinstance(aggregate, Count):
@@ -149,7 +147,9 @@ class NonrelDatabaseValidation(BaseDatabaseValidation):
 
 class NonrelDatabaseIntrospection(BaseDatabaseIntrospection):
     def table_names(self):
-        """Returns a list of names of all tables that exist in the database."""
+        """
+        Returns a list of names of all tables that exist in the database.
+        """
         return self.django_table_names()
 
 

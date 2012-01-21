@@ -9,6 +9,7 @@ from django.db.models.sql.constants import LOOKUP_SEP, MULTI, SINGLE
 from django.db.models.sql.where import AND, OR
 from django.db.utils import DatabaseError, IntegrityError
 from django.utils.tree import Node
+from django.utils.functional import Promise
 
 
 EMULATED_OPS = {
@@ -127,6 +128,8 @@ class NonrelQuery(object):
         inconvenient for nonrel back-ends.
 
         TODO: Move to DatabaseOperations too?
+        TODO: Call convert_value_for_db at the end, don't leave.
+              this to subclasses.
         """
 
         # Undo Field.get_db_prep_lookup putting most values in a list.
@@ -142,14 +145,6 @@ class NonrelQuery(object):
                 value = annotation
             else:
                 value = value[0]
-
-        # Handle lazy strings.
-        # TODO: Test and better explanation is needed; if this is needed
-        # should be moved to convert_value_for_db.
-        if isinstance(value, unicode):
-            value = unicode(value)
-        elif isinstance(value, str):
-            value = str(value)
 
         # Remove percents added by Field.get_db_prep_lookup (useful
         # if one were to use the value in a LIKE expression).
@@ -280,22 +275,23 @@ class NonrelCompiler(SQLCompiler):
 
     def execute_sql(self, result_type=MULTI):
         """
-        Handles aggregate/count queries
+        Handles SQL-like aggregate queries. This class only emulates COUNT
+        by using abstract NonrelQuery.count method.
         """
         aggregates = self.query.aggregate_select.values()
-        # Simulate a count()
         if aggregates:
             assert len(aggregates) == 1
             aggregate = aggregates[0]
             assert isinstance(aggregate, sqlaggregates.Count)
-            meta = self.query.get_meta()
-            assert aggregate.col == '*' or aggregate.col == (meta.db_table, meta.pk.column)
+            opts = self.query.get_meta()
+            assert aggregate.col == '*' or aggregate.col == (opts.db_table, opts.pk.column)
             count = self.get_count()
             if result_type is SINGLE:
                 return [count]
             elif result_type is MULTI:
                 return [[count]]
-        raise NotImplementedError('The database backend only supports count() queries')
+        raise NotImplementedError('The database backend only supports '
+                                  'count() queries.')
 
     # ----------------------------------------------
     # Additional NonrelCompiler API
@@ -406,7 +402,7 @@ class NonrelCompiler(SQLCompiler):
                 descending = not descending
             yield (opts.get_field(field).column, descending)
 
-    def _parse_db_type(self, db_type):
+    def parse_db_type(self, db_type):
         """
         Separates elements of db_type into a tuple. Used for separating
         subtype of iterable fields.
@@ -422,7 +418,11 @@ class NonrelCompiler(SQLCompiler):
     def convert_value_for_db(self, db_type, value):
         """
         Converts a standard Python value to a type that can be stored
-        by the database.
+        or processed by the database.
+
+        This implementatin only converts values with "list", "set" or
+        "dict" db_type and evaluates lazy objects. You may want to call
+        it before doing other back-end specific conversions.
 
         There are some other ways to convert values for the database in
         Django (BaseDatabaseOperations.value_to_db_* / convert_values),
@@ -434,7 +434,7 @@ class NonrelCompiler(SQLCompiler):
         -- some standard fields do not call value_to_db_* for each
            operation (e.g. DecimalField only defines get_db_value_save,
            so the conversion is not applied to lookup values).
-        Nevertheless standard methods should be preferred.
+        Nevertheless, standard methods should be preferred.
 
         TODO: Handle AbstractIterableFields here (e.g. let them use
         'list:subtype' as db_type, and convert elements of all values
@@ -445,8 +445,15 @@ class NonrelCompiler(SQLCompiler):
         :param db_type: Database type or encoding that should be used.
         :param value: Value to convert.
         """
+        db_type, db_subtype = self.parse_db_type(db_type)
 
-        db_type, db_subtype = self._parse_db_type(db_type)
+        # Force evaluation of lazy objects (e.g. lazy translation strings).
+        # Some back-ends pass values directly to the database driver, which
+        # may fail if it relies on type inspection and gets a functional proxy.
+        # This code relies on __unicode_ cast in django.utils.functional just
+        # evaluating the wrapped function and doing nothing more.
+        if isinstance(value, Promise):
+             value = unicode(value)
 
         # Convert all values in a list or set using its subtype.
         # We store both as lists on default.
@@ -473,14 +480,16 @@ class NonrelCompiler(SQLCompiler):
         Converts a database type to a standard Python type.
 
         If you encoded a value for storage in the database, reverse the
-        encoding here. This implementation only provides reference
-        implementations for nonrel fields (ListField, SetField etc.).
+        encoding here. This implementation only deconverts values of 
+        iterables (just for "list", "set" or "dict" db_type).
+
+        Note, that after changes to data_types definitions, old types
+        need to be handled due to existing stored data.
 
         :param db_type: Encoding / decoding procedure identifier.
         :param value: A value received from the database.
         """
-
-        db_type, db_subtype = self._parse_db_type(db_type)
+        db_type, db_subtype = self.parse_db_type(db_type)
 
         # Deconvert each value in a list, return a set for the set type.
         if db_type == 'ListField' or db_type == 'SetField':
