@@ -51,12 +51,20 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
 
     def db_type(self, field):
         """
-        Use "key" type for primary key fields independent of the field
-        class, for other fields use the original Django logic.
+        Use the abstract "key" type for primary key fields independent of the
+        field class, for other fields use the original Django logic.
+
+        TODO: Introduce features.has_key/reference_type?
         """
         if field.primary_key:
             return 'key'
         return super(NonrelDatabaseCreation, self).db_type(field)
+
+    def related_db_type(self, field):
+        """
+        Use the "key" type for foreign keys and other entity references.
+        """
+        return 'key'
 
     def sql_create_model(self, model, style, known_models=set()):
         """

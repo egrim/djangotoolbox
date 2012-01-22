@@ -321,6 +321,11 @@ class NonrelCompiler(SQLCompiler):
         return result
 
     def check_query(self):
+        """
+        Checks if a query is supported by the database.
+
+        TODO: Short description of what is expected not to be available.
+        """
         if (len([a for a in self.query.alias_map if self.query.alias_refcount[a]]) > 1
                 or self.query.distinct or self.query.extra or self.query.having):
             raise DatabaseError('This query is not supported by the database.')
@@ -328,6 +333,8 @@ class NonrelCompiler(SQLCompiler):
     def get_count(self, check_exists=False):
         """
         Counts matches using the current filter constraints.
+
+        :param check_exists: Only check if any object matches.
         """
         if check_exists:
             high_mark = 1
@@ -342,7 +349,7 @@ class NonrelCompiler(SQLCompiler):
         query.add_filters(self.query.where)
         query.order_by(self._get_ordering())
 
-        # This at least satisfies the most basic unit tests
+        # This at least satisfies the most basic unit tests.
         if settings.DEBUG:
             self.connection.queries.append({'sql': repr(query)})
         return query
@@ -350,7 +357,7 @@ class NonrelCompiler(SQLCompiler):
     def get_fields(self):
         """
         Returns the fields which should get loaded from the back-end by
-        the query.
+        the current query.
         """
         # We only set this up here because
         # related_select_fields isn't populated until
@@ -405,7 +412,7 @@ class NonrelCompiler(SQLCompiler):
     def parse_db_type(self, db_type):
         """
         Separates elements of db_type into a tuple. Used for separating
-        subtype of iterable fields.
+        type of elements for iterable fields.
 
         TODO: Do this in NonrelDatabaseCreation instead?
         """
