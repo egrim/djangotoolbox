@@ -8,17 +8,28 @@ from .creation import NonrelDatabaseCreation
 
 
 class NonrelDatabaseFeatures(BaseDatabaseFeatures):
+
+    # NoSQL databases usually return a key after saving a new object.
     can_return_id_from_insert = True
-    supports_unspecified_pk = False
-    supports_regex_backreferencing = True
+
+    # TODO: Why? Doesn't seem true in general.
     supports_date_lookup_using_string = False
     supports_timezones = False
 
+    # Features that commonly not available on nonrel databases.
     supports_joins = False
     distinguishes_insert_from_update = False
     supports_select_related = False
     supports_deleting_related_objects = False
-    string_based_auto_field = False
+
+    # Does the database use one special type for all keys and references?
+    # If set to True, all primary keys, foreign keys and other references
+    # will get "key" db_type, otherwise it will be determined using original
+    # Django's logic.
+    has_key_type = True
+
+    # Can a dict be saved in the database,
+    # TODO: Serialize and save as string in this module if not.
     supports_dicts = False
 
     def _supports_transactions(self):
@@ -66,17 +77,11 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
     def value_to_db_auto(self, value):
         """
-        Cast to a string rather than integers for databases
-        supporting string based AutoFields.
-
-        TODO: features.has_key_type sounds better.
-        TODO: Returning value without conversion here would make
-              int/string keys work for GAE.
+        If the database has its own key type it's better to leave any
+        conversions to the back-end.
         """
-        if self.connection.features.string_based_auto_field:
-            if value is None:
-                return None
-            return unicode(value)
+        if self.connection.features.has_key_type:
+            return value
         return super(NonrelDatabaseOperations, self).value_to_db_auto(value)
 
     def value_to_db_date(self, value):

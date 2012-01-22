@@ -12,9 +12,10 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         # ObjectIds, Redis uses strings, while Cassandra supports
         # different types (including binary data).
         'AutoField':         'key',
+        'RelatedAutoField':  'key',
         'ForeignKey':        'key',
         'OneToOneField':     'key',
-        'RelatedAutoField':  'key',
+        'ManyToManyField':   'key',
 
         # Standard fields types, more or less suitable for databases
         # (or its client / driver) being able to directly store or
@@ -51,20 +52,22 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
 
     def db_type(self, field):
         """
-        Use the abstract "key" type for primary key fields independent of the
-        field class, for other fields use the original Django logic.
-
-        TODO: Introduce features.has_key/reference_type?
+        If the databases has a special key type, return "key" for all
+        primary key fields independent of the field class, otherwise
+        use original Django's logic.
         """
-        if field.primary_key:
+        if self.connection.features.has_key_type and field.primary_key:
             return 'key'
         return super(NonrelDatabaseCreation, self).db_type(field)
 
     def related_db_type(self, field):
         """
-        Use the "key" type for foreign keys and other entity references.
+        If the databases has a special key type, use "key" db_type for
+        foreign keys and other references.
         """
-        return 'key'
+        if self.connection.features.has_key_type:
+            return 'key'
+        return super(NonrelDatabaseCreation, self).db_type(field)
 
     def sql_create_model(self, model, style, known_models=set()):
         """
