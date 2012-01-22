@@ -4,10 +4,13 @@ from django.db import models
 from django.core.exceptions import ValidationError
 from django.utils.importlib import import_module
 
+
 __all__ = ('RawField', 'ListField', 'DictField', 'SetField',
            'BlobField', 'EmbeddedModelField')
 
+
 EMPTY_ITER = ()
+
 
 class _HandleAssignment(object):
     """
@@ -24,10 +27,11 @@ class _HandleAssignment(object):
     def __set__(self, obj, value):
         obj.__dict__[self.field.name] = self.field.to_python(value)
 
+
 class RawField(models.Field):
     """ Generic field to store anything your database backend allows you to. """
-    def get_internal_type(self):
-        return 'RawField'
+    pass
+
 
 class AbstractIterableField(models.Field):
     """
@@ -62,13 +66,10 @@ class AbstractIterableField(models.Field):
         if issubclass(metaclass, models.SubfieldBase):
             setattr(cls, self.name, _HandleAssignment(self))
 
-    @property
-    def db_type_prefix(self):
-        return self.__class__.__name__
-
     def db_type(self, connection):
+        db_type = super(AbstractIterableField, self).db_type(connection=connection)
         item_db_type = self.item_field.db_type(connection=connection)
-        return '%s:%s' % (self.db_type_prefix, item_db_type)
+        return '%s:%s' % (db_type, item_db_type)
 
     def _convert(self, func, values, *args, **kwargs):
         if isinstance(values, (list, tuple, set)):
@@ -119,6 +120,7 @@ class AbstractIterableField(models.Field):
     def formfield(self, **kwargs):
         raise NotImplementedError('No form field implemented for %r' % type(self))
 
+
 class ListField(AbstractIterableField):
     """
     Field representing a Python ``list``.
@@ -129,7 +131,6 @@ class ListField(AbstractIterableField):
     database.
     """
     _type = list
-    db_type_prefix = 'ListField'
 
     def __init__(self, *args, **kwargs):
         self.ordering = kwargs.pop('ordering', None)
@@ -146,12 +147,13 @@ class ListField(AbstractIterableField):
             values.sort(key=self.ordering)
         return super(ListField, self).pre_save(model_instance, add)
 
+
 class SetField(AbstractIterableField):
     """
     Field representing a Python ``set``.
     """
     _type = set
-    db_type_prefix = 'SetField'
+
 
 class DictField(AbstractIterableField):
     """
@@ -163,7 +165,6 @@ class DictField(AbstractIterableField):
     Depending on the backend, keys that aren't strings might not be allowed.
     """
     _type = dict
-    db_type_prefix = 'DictField'
 
     def _convert(self, func, values, *args, **kwargs):
         if values is None:
@@ -175,6 +176,7 @@ class DictField(AbstractIterableField):
         if not isinstance(values, dict):
             raise ValidationError('Value is of type %r. Should be a dict.' % type(values))
 
+
 class BlobField(models.Field):
     """
     A field for storing blobs of binary data.
@@ -185,9 +187,6 @@ class BlobField(models.Field):
     In the latter case, the object has to provide a ``read`` method from which
     the blob is read.
     """
-    def get_internal_type(self):
-        return 'BlobField'
-
     def formfield(self, **kwargs):
         # A file widget is provided, but use model FileField or ImageField
         # for storing specific files most of the time
@@ -209,6 +208,7 @@ class BlobField(models.Field):
     def value_to_string(self, obj):
         return str(self._get_val_from_obj(obj))
 
+
 class EmbeddedModelField(models.Field):
     """
     Field that allows you to embed a model instance.
@@ -222,9 +222,6 @@ class EmbeddedModelField(models.Field):
         self.embedded_model = model
         kwargs.setdefault('default', None)
         super(EmbeddedModelField, self).__init__(*args, **kwargs)
-
-    def db_type(self, connection):
-        return 'DictField:RawField'
 
     def _set_model(self, model):
         # We need to know the model to generate a valid key for the lookup but

@@ -21,6 +21,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         # (or its client / driver) being able to directly store or
         # process Python objects, but having separate types for storing
         # short and long strings.
+        # TODO: Use unicode rather than text/longtext.
         'BigIntegerField':   'long',
         'BooleanField':      'bool',
         'CharField':         'text',
@@ -45,9 +46,15 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'URLField':          'text',
         'XMLField':          'longtext',
 
-         # Mappings for fields provided by nonrel.
-        'BlobField':         'blob',
+        # Mappings for fields provided by nonrel. You may use "list" 
+        # for SetFields, but not DictFields. TODO: Doesn't seem hard to handle.
         'RawField':          'raw',
+        'BlobField':         'blob',
+        'AbstractIterableField': 'list',
+        'ListField':         'list',
+        'SetField':          'set',
+        'DictField':         'dict',
+        'EmbeddedModelField': 'dict',
     }
 
     def db_type(self, field):
@@ -71,8 +78,8 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
 
     def sql_create_model(self, model, style, known_models=set()):
         """
-        Most NoSQL databases are schema-less, no data definitions are
-        needed.
+        Most NoSQL databases are mostly schema-less, no data
+        definitions are needed.
         """
         return [], {}
 

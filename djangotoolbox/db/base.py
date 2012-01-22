@@ -4,8 +4,6 @@ from django.db.backends import BaseDatabaseFeatures, BaseDatabaseOperations, \
     BaseDatabaseWrapper, BaseDatabaseClient, BaseDatabaseValidation, \
     BaseDatabaseIntrospection
 
-from .creation import NonrelDatabaseCreation
-
 
 class NonrelDatabaseFeatures(BaseDatabaseFeatures):
 
@@ -39,9 +37,10 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
 class NonrelDatabaseOperations(BaseDatabaseOperations):
     """
     Override all database conversions normally done by fields (through
-    get_db_prep_value/save/lookup) to be able to pass Python values
-    to the database layer. Drivers of NoSQL database either can work
-    with Python data directly or need some type-based conversions.
+    get_db_prep_value/save/lookup) to make it possible to pass Python
+    values directly to the database layer. Drivers of NoSQL database
+    either can work with Python objects directly or need some
+    specific type-based conversions.
     """
     def __init__(self, connection):
         self.connection = connection
@@ -87,30 +86,28 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     def value_to_db_date(self, value):
         """
         Does not do any conversion, assuming that a date can be stored
-        directly. Parent casts to a string here using some arbitrary
-        format.
+        directly.
         """
         return value
 
     def value_to_db_datetime(self, value):
         """
         Does not do any conversion, assuming that a datetime can be
-        stored directly. Parent method simply casts to a string here.
+        stored directly.
         """
         return value
 
     def value_to_db_time(self, value):
         """
         Does not do any conversion, assuming that a time can be stored
-        directly. Parent method simply casts to a string here.
+        directly.
         """
         return value
 
     def value_to_db_decimal(self, value):
         """
         Does not do any conversion, assuming that a decimal can be
-        stored directly. Parent method does a simple string conversion
-        (that does not preserve comparisons).
+        stored directly.
         """
         return value
 
@@ -118,23 +115,22 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         """
         Converts year bounds to datetime bounds as these can likely be
         used directly, also adds one to the upper bound as database is
-        expected to use one strict inequality for between-like filters.
+        expected to use one strict inequality for BETWEEN-like filters.
         """
         return [datetime.datetime(value, 1, 1, 0, 0, 0, 0),
-                datetime.datetime(value+1, 1, 1, 0, 0, 0, 0)]
+                datetime.datetime(value + 1, 1, 1, 0, 0, 0, 0)]
 
     def convert_values(self, value, field):
         """
         Does no conversion, assuming that values returned by the
         database are standard Python types suitable to be passed to
-        fields. Parent casts values meant for Integer and Auto fields
-        to int and every other value to float here.
+        fields.
         """
         return value
 
     def check_aggregate_support(self, aggregate):
         """
-        NonrelQueries are only expected to implement COUNT.
+        NonrelQueries are only expected to implement COUNT in general.
         """
         from django.db.models.sql.aggregates import Count
         if not isinstance(aggregate, Count):

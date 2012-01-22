@@ -414,11 +414,11 @@ class NonrelCompiler(SQLCompiler):
         Separates elements of db_type into a tuple. Used for separating
         type of elements for iterable fields.
 
-        TODO: Do this in NonrelDatabaseCreation instead?
+        TODO: Do this in NonrelDatabaseCreation and pass tuples instead?
         """
         try:
             db_type, db_subtype = db_type.split(':', 1)
-        except ValueError:
+        except (AttributeError, ValueError):
             db_subtype = None
         return db_type, db_subtype
 
@@ -441,11 +441,10 @@ class NonrelCompiler(SQLCompiler):
         -- some standard fields do not call value_to_db_* for each
            operation (e.g. DecimalField only defines get_db_value_save,
            so the conversion is not applied to lookup values).
-        Nevertheless, standard methods should be preferred.
 
-        TODO: Handle AbstractIterableFields here (e.g. let them use
-        'list:subtype' as db_type, and convert elements of all values
-        using this type.
+        Prefer standard methods when the conversion is specific to a 
+        field kind and these methods when you can convert any value of
+        a type.
 
         TODO: This should belong to DatabaseOperations.
 
@@ -464,7 +463,7 @@ class NonrelCompiler(SQLCompiler):
 
         # Convert all values in a list or set using its subtype.
         # We store both as lists on default.
-        if db_type == 'ListField' or db_type == 'SetField':
+        if db_type == 'list' or db_type == 'set':
 
             # Note that value for a list field lookup may be an iterable
             # list element, that should be converted as a single value.
@@ -475,7 +474,7 @@ class NonrelCompiler(SQLCompiler):
 
         # Convert dict values, pickle and store it as a Blob.
         # TODO: Only values, not keys?
-        elif db_type == 'DictField':
+        elif db_type == 'dict':
             if isinstance(value, dict):
                 value = dict((key, self.convert_value_for_db(db_subtype, subvalue))
                               for key, subvalue in value.iteritems())
@@ -499,14 +498,14 @@ class NonrelCompiler(SQLCompiler):
         db_type, db_subtype = self.parse_db_type(db_type)
 
         # Deconvert each value in a list, return a set for the set type.
-        if db_type == 'ListField' or db_type == 'SetField':
+        if db_type == 'list' or db_type == 'set':
             value = [self.convert_value_from_db(db_subtype, subvalue)
                      for subvalue in value]
-            if db_type == 'SetField':
+            if db_type == 'set':
                 value = set(value)
 
         # We may have encoded dict values, so now decode them.
-        elif db_type == 'DictField':
+        elif db_type == 'dict':
             value = dict((key, self.convert_value_from_db(db_subtype, subvalue))
                           for key, subvalue in value.iteritems())
 
