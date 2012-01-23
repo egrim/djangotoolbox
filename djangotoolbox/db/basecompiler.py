@@ -9,7 +9,6 @@ from django.db.models.sql.constants import LOOKUP_SEP, MULTI, SINGLE
 from django.db.models.sql.where import AND, OR
 from django.db.utils import DatabaseError, IntegrityError
 from django.utils.tree import Node
-from django.utils.functional import Promise
 
 
 EMULATED_OPS = {
@@ -30,7 +29,7 @@ class NonrelQuery(object):
     """
     Base class for nonrel queries. Provides in-memory filtering and
     ordering and a framework for converting SQL constraint tree built
-    by Django to a representation more suitable for most nonrel
+    by Django to a representation more suitable for most NoSQL
     databases.
     """
 
@@ -38,10 +37,10 @@ class NonrelQuery(object):
     # Public API
     # ----------------------------------------------
     def __init__(self, compiler, fields):
-        self.fields = fields
         self.compiler = compiler
         self.connection = compiler.connection
         self.query = self.compiler.query
+        self.fields = fields
         self._negated = False
 
     def fetch(self, low_mark=0, high_mark=None):
@@ -127,9 +126,10 @@ class NonrelQuery(object):
         Undoes preparations done by Field.get_db_prep_lookup
         inconvenient for nonrel back-ends.
 
-        TODO: Move to DatabaseOperations too?
-        TODO: Call convert_value_for_db at the end, don't leave.
-              this to subclasses.
+        TODO: Move to DatabaseOperations too (the code this counters
+              is there)?
+        TODO: Call convert_value_for_db at the end, rather than leave
+              it to subclasses (execute_sql methods do)?
         """
 
         # Undo Field.get_db_prep_lookup putting most values in a list.
@@ -183,6 +183,12 @@ class NonrelQuery(object):
         return result
 
     def _matches_filters(self, entity, filters):
+        """
+        Checks if an entity returned by the database would match
+        constraints in a WHERE tree.
+
+        TODO: Use _decode_child and _normalize_lookup_value.
+        """
         # Filters without rules match everything
         if not filters.children:
             return True
@@ -244,11 +250,13 @@ class NonrelQuery(object):
                 return result
         return 0
 
-    def convert_value_from_db(self, db_type, value):
-        return self.compiler.convert_value_from_db(db_type, value)
-
     def convert_value_for_db(self, db_type, value):
-        return self.compiler.convert_value_for_db(db_type, value)
+        return self.connection.ops.convert_value_for_db(
+            db_type, value, self.query.get_meta().db_table)
+
+    def convert_value_from_db(self, db_type, value):
+        return self.connection.ops.convert_value_from_db(
+            db_type, value, self.query.get_meta().db_table)
 
 
 class NonrelCompiler(SQLCompiler):
@@ -311,8 +319,9 @@ class NonrelCompiler(SQLCompiler):
             if value is NOT_PROVIDED:
                 value = field.get_default()
             else:
-                value = self.convert_value_from_db(
-                    field.db_type(connection=self.connection), value)
+                value = self.connection.ops.convert_value_from_db(
+                    field.db_type(connection=self.connection), value,
+                    self.query.get_meta().db_table)
                 value = self.connection.ops.convert_values(value, field)
             if value is None and not field.null:
                 raise IntegrityError("Non-nullable field %s can't be None!"
@@ -356,16 +365,17 @@ class NonrelCompiler(SQLCompiler):
 
     def get_fields(self):
         """
-        Returns the fields which should get loaded from the back-end by
-        the current query.
+        Returns fields which should get loaded from the back-end by the
+        current query.
         """
-        # We only set this up here because
-        # related_select_fields isn't populated until
-        # execute_sql() has been called.
+
+        # We only set this up here because related_select_fields isn't
+        # populated until execute_sql() has been called.
         if self.query.select_fields:
             fields = self.query.select_fields + self.query.related_select_fields
         else:
             fields = self.query.model._meta.fields
+
         # If the field was deferred, exclude it from being passed
         # into `resolve_columns` because it wasn't selected.
         only_load = self.deferred_to_columns()
@@ -409,108 +419,6 @@ class NonrelCompiler(SQLCompiler):
                 descending = not descending
             yield (opts.get_field(field).column, descending)
 
-    def parse_db_type(self, db_type):
-        """
-        Separates elements of db_type into a tuple. Used for separating
-        type of elements for iterable fields.
-
-        TODO: Do this in NonrelDatabaseCreation and pass tuples instead?
-        """
-        try:
-            db_type, db_subtype = db_type.split(':', 1)
-        except (AttributeError, ValueError):
-            db_subtype = None
-        return db_type, db_subtype
-
-    def convert_value_for_db(self, db_type, value):
-        """
-        Converts a standard Python value to a type that can be stored
-        or processed by the database.
-
-        This implementatin only converts values with "list", "set" or
-        "dict" db_type and evaluates lazy objects. You may want to call
-        it before doing other back-end specific conversions.
-
-        There are some other ways to convert values for the database in
-        Django (BaseDatabaseOperations.value_to_db_* / convert_values),
-        but there are some problems with them:
-        -- there are no methods for string / integer conversion or for
-           nonrel specific fields (e.g. iterables, blobs);
-        -- some conversions are not specific to a field kind and can't
-           rely on field internal_type (e.g. key conversions);
-        -- some standard fields do not call value_to_db_* for each
-           operation (e.g. DecimalField only defines get_db_value_save,
-           so the conversion is not applied to lookup values).
-
-        Prefer standard methods when the conversion is specific to a 
-        field kind and these methods when you can convert any value of
-        a type.
-
-        TODO: This should belong to DatabaseOperations.
-
-        :param db_type: Database type or encoding that should be used.
-        :param value: Value to convert.
-        """
-        db_type, db_subtype = self.parse_db_type(db_type)
-
-        # Force evaluation of lazy objects (e.g. lazy translation strings).
-        # Some back-ends pass values directly to the database driver, which
-        # may fail if it relies on type inspection and gets a functional proxy.
-        # This code relies on __unicode_ cast in django.utils.functional just
-        # evaluating the wrapped function and doing nothing more.
-        if isinstance(value, Promise):
-             value = unicode(value)
-
-        # Convert all values in a list or set using its subtype.
-        # We store both as lists on default.
-        if db_type == 'list' or db_type == 'set':
-
-            # Note that value for a list field lookup may be an iterable
-            # list element, that should be converted as a single value.
-            # TODO: What about looking up a list in a list of lists?
-            if isinstance(value, (list, tuple, set)):
-                value = [self.convert_value_for_db(db_subtype, subvalue)
-                         for subvalue in value]
-
-        # Convert dict values, pickle and store it as a Blob.
-        # TODO: Only values, not keys?
-        elif db_type == 'dict':
-            if isinstance(value, dict):
-                value = dict((key, self.convert_value_for_db(db_subtype, subvalue))
-                              for key, subvalue in value.iteritems())
-
-        return value
-
-    def convert_value_from_db(self, db_type, value):
-        """
-        Converts a database type to a standard Python type.
-
-        If you encoded a value for storage in the database, reverse the
-        encoding here. This implementation only deconverts values of 
-        iterables (just for "list", "set" or "dict" db_type).
-
-        Note, that after changes to data_types definitions, old types
-        need to be handled due to existing stored data.
-
-        :param db_type: Encoding / decoding procedure identifier.
-        :param value: A value received from the database.
-        """
-        db_type, db_subtype = self.parse_db_type(db_type)
-
-        # Deconvert each value in a list, return a set for the set type.
-        if db_type == 'list' or db_type == 'set':
-            value = [self.convert_value_from_db(db_subtype, subvalue)
-                     for subvalue in value]
-            if db_type == 'set':
-                value = set(value)
-
-        # We may have encoded dict values, so now decode them.
-        elif db_type == 'dict':
-            value = dict((key, self.convert_value_from_db(db_subtype, subvalue))
-                          for key, subvalue in value.iteritems())
-
-        return value
-
 
 class NonrelInsertCompiler(object):
     def execute_sql(self, return_id=False):
@@ -520,8 +428,9 @@ class NonrelInsertCompiler(object):
                 if not field.null and value is None:
                     raise IntegrityError("You can't set %s (a non-nullable "
                                          "field) to None!" % field.name)
-                value = self.convert_value_for_db(
-                    field.db_type(connection=self.connection), value)
+                value = self.connection.ops.convert_value_for_db(
+                    field.db_type(connection=self.connection), value,
+                    self.query.get_meta().db_table)
             data[column] = value
         return self.insert(data, return_id=return_id)
 
@@ -541,8 +450,9 @@ class NonrelUpdateCompiler(object):
                 value = value.prepare_database_save(field)
             else:
                 value = field.get_db_prep_save(value, connection=self.connection)
-            value = self.convert_value_for_db(
-                field.db_type(connection=self.connection), value)
+            value = self.connection.ops.convert_value_for_db(
+                field.db_type(connection=self.connection), value,
+                self.query.get_meta().db_table)
             values.append((field, value))
         return self.update(values)
 

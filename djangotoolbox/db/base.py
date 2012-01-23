@@ -3,6 +3,7 @@ import datetime
 from django.db.backends import BaseDatabaseFeatures, BaseDatabaseOperations, \
     BaseDatabaseWrapper, BaseDatabaseClient, BaseDatabaseValidation, \
     BaseDatabaseIntrospection
+from django.utils.functional import Promise
 
 
 class NonrelDatabaseFeatures(BaseDatabaseFeatures):
@@ -14,7 +15,7 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
     supports_date_lookup_using_string = False
     supports_timezones = False
 
-    # Features that commonly not available on nonrel databases.
+    # Features that are commonly not available on nonrel databases.
     supports_joins = False
     distinguishes_insert_from_update = False
     supports_select_related = False
@@ -26,8 +27,7 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
     # Django's logic.
     has_key_type = True
 
-    # Can a dict be saved in the database,
-    # TODO: Serialize and save as string in this module if not.
+    # Can a dictionary be saved / fetched from the database.
     supports_dicts = False
 
     def _supports_transactions(self):
@@ -38,9 +38,29 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     """
     Override all database conversions normally done by fields (through
     get_db_prep_value/save/lookup) to make it possible to pass Python
-    values directly to the database layer. Drivers of NoSQL database
-    either can work with Python objects directly or need some
-    specific type-based conversions.
+    values directly to the database layer. On the other hand, provide
+    framework for making type-based conversions --  drivers of NoSQL
+    database either can work with Python objects directly, sometimes
+    representing one type using a another or expect everything encoded
+    in some specific manner.
+
+    Django normally handles conversions for the database by providing
+    BaseDatabaseOperations.value_to_db_* / convert_values methods,
+    but there are some problems with them:
+    -- there are no methods for string / integer conversion or for
+       nonrel specific fields (e.g. iterables, blobs);
+    -- some conversions are not specific to a field kind and can't rely
+       on field internal_type (e.g. key conversions);
+    -- some standard fields do not call value_to_db_* for each
+       operation (e.g. DecimalField only defines get_db_value_save, so
+       the conversion is not applied to lookup values).
+
+    Prefer standard methods when the conversion is specific to a
+    field kind and these methods when you can convert any value of
+    a type.
+
+    Please note, that after changes to type conversions, data saved
+    using preexisting methods needs to be handled.
     """
     def __init__(self, connection):
         self.connection = connection
@@ -134,8 +154,90 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         """
         from django.db.models.sql.aggregates import Count
         if not isinstance(aggregate, Count):
-            raise NotImplementedError("This database does not support %r "
-                                      "aggregates" % type(aggregate))
+            raise NotImplementedError('This database does not support %r '
+                                      'aggregates' % type(aggregate))
+
+    def parse_db_type(self, db_type):
+        """
+        Separates elements of db_type into a tuple. Used for separating
+        type of elements for iterable fields.
+
+        TODO: Do this in NonrelDatabaseCreation and pass tuples instead?
+        """
+        try:
+            db_type, db_subtype = db_type.split(':', 1)
+        except (AttributeError, ValueError):
+            db_subtype = None
+        return db_type, db_subtype
+
+    def convert_value_for_db(self, db_type, value, db_table):
+        """
+        Converts a standard Python value to a type that can be stored
+        or processed by the database.
+
+        This implementatin only converts values with "list", "set" or
+        "dict" db_type and evaluates lazy objects. You may want to call
+        it before doing other back-end specific conversions.
+
+        :param db_type: Name of type or encoding that should be used
+        :param value: Value to convert
+        """
+        db_type, db_subtype = self.parse_db_type(db_type)
+
+        # Force evaluation of lazy objects (e.g. lazy translation strings).
+        # Some back-ends pass values directly to the database driver, which
+        # may fail if it relies on type inspection and gets a functional proxy.
+        # This code relies on __unicode_ cast in django.utils.functional just
+        # evaluating the wrapped function and doing nothing more.
+        if isinstance(value, Promise):
+             value = unicode(value)
+
+        # Convert all values in a list or set using its subtype.
+        # We store both as lists on default.
+        if db_type == 'list' or db_type == 'set':
+
+            # Note that value for a list field lookup may be an iterable
+            # list element, that should be converted as a single value.
+            # TODO: What about looking up a list in a list of lists?
+            if isinstance(value, (list, tuple, set)):
+                value = [self.convert_value_for_db(db_subtype, subvalue, db_table)
+                         for subvalue in value]
+
+        # Convert dict values, pickle and store it as a Blob.
+        # TODO: Only values, not keys?
+        elif db_type == 'dict':
+            if isinstance(value, dict):
+                value = dict((key, self.convert_value_for_db(db_subtype, subvalue, db_table))
+                              for key, subvalue in value.iteritems())
+
+        return value
+
+    def convert_value_from_db(self, db_type, value, db_table):
+        """
+        Converts a database type to a standard Python type.
+
+        If you encoded a value for storage in the database, reverse the
+        encoding here. This implementation only recuresively deconverts
+        elements of iterables (for "list", "set" or "dict" db_type).
+
+        :param db_type: Encoding / decoding procedure identifier
+        :param value: A value received from the database
+        """
+        db_type, db_subtype = self.parse_db_type(db_type)
+
+        # Deconvert each value in a list, return a set for the set type.
+        if db_type == 'list' or db_type == 'set':
+            value = [self.convert_value_from_db(db_subtype, subvalue, db_table)
+                     for subvalue in value]
+            if db_type == 'set':
+                value = set(value)
+
+        # We may have encoded dict values, so now decode them.
+        elif db_type == 'dict':
+            value = dict((key, self.convert_value_from_db(db_subtype, subvalue, db_table))
+                          for key, subvalue in value.iteritems())
+
+        return value
 
 
 class NonrelDatabaseClient(BaseDatabaseClient):
