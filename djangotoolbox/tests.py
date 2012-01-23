@@ -49,14 +49,15 @@ if supports_dicts:
         dictfield_nullable = DictField(null=True)
         auto_now = DictField(models.DateTimeField(auto_now=True))
 
-class FilterTest(TestCase):
+class IterableFieldsTest(TestCase):
     floats = [5.3, 2.6, 9.1, 1.58]
     names = [u'Kakashi', u'Naruto', u'Sasuke', u'Sakura',]
     unordered_ints = [4, 2, 6, 1]
 
     def setUp(self):
-        for i, float in enumerate(FilterTest.floats):
-            ListModel(integer=i+1, floating_point=float, names=FilterTest.names[:i+1]).save()
+        for i, float in enumerate(IterableFieldsTest.floats):
+            ListModel(integer=i+1, floating_point=float,
+                      names=IterableFieldsTest.names[:i+1]).save()
 
     def test_startswith(self):
         self.assertEquals(dict([(entity.pk, entity.names) for entity in
@@ -198,6 +199,18 @@ class FilterTest(TestCase):
         self.assertEquals([entity.names for entity in
             ListModel.objects.exclude(Q(names__lt='Sakura') | Q(names__gte='Sasuke'))],
                 [['Kakashi', 'Naruto', 'Sasuke', 'Sakura']])
+
+    def test_list_with_foreignkeys(self):
+        class Model(models.Model):
+            pass
+        class ReferenceList(models.Model):
+            keys = ListField(models.ForeignKey(Model))
+        model1 = Model.objects.create()
+        model2 = Model.objects.create()
+        ReferenceList.objects.create(keys=[model1, model2])
+        self.assertEqual(
+            Model.objects.get(pk=ReferenceList.objects.all()[0].keys[0]),
+            model1)
 
 
 class BaseModel(models.Model):
