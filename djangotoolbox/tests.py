@@ -200,17 +200,17 @@ class IterableFieldsTest(TestCase):
             ListModel.objects.exclude(Q(names__lt='Sakura') | Q(names__gte='Sasuke'))],
                 [['Kakashi', 'Naruto', 'Sasuke', 'Sakura']])
 
-#    def test_list_with_foreignkeys(self):
-#        class Model(models.Model):
-#            pass
-#        class ReferenceList(models.Model):
-#            keys = ListField(models.ForeignKey(Model))
-#        model1 = Model.objects.create()
-#        model2 = Model.objects.create()
-#        ReferenceList.objects.create(keys=[model1, model2])
-#        self.assertEqual(
-#            Model.objects.get(pk=ReferenceList.objects.all()[0].keys[0]),
-#            model1)
+    def test_list_with_foreignkeys(self):
+        class Model(models.Model):
+            pass
+        class ReferenceList(models.Model):
+            keys = ListField(models.ForeignKey(Model))
+        model1 = Model.objects.create()
+        model2 = Model.objects.create()
+        ReferenceList.objects.create(keys=[model1.pk, model2.pk])
+        self.assertEqual(
+            Model.objects.get(pk=ReferenceList.objects.get().keys[0]),
+            model1)
 
 
 class BaseModel(models.Model):
