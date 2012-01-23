@@ -27,10 +27,12 @@ EMULATED_OPS = {
 
 class NonrelQuery(object):
     """
-    Base class for nonrel queries. Provides in-memory filtering and
-    ordering and a framework for converting SQL constraint tree built
-    by Django to a representation more suitable for most NoSQL
-    databases.
+    Base class for nonrel queries. This works on the same level as
+    Django's sql.Query (below compilers).
+
+    Provides in-memory filtering and ordering and a framework for
+    converting SQL constraint tree built by Django to a representation
+    more suitable for most NoSQL databases.
     """
 
     # ----------------------------------------------
@@ -39,7 +41,7 @@ class NonrelQuery(object):
     def __init__(self, compiler, fields):
         self.compiler = compiler
         self.connection = compiler.connection
-        self.query = self.compiler.query
+        self.query = self.compiler.query # sql.Query
         self.fields = fields
         self._negated = False
 
@@ -250,18 +252,13 @@ class NonrelQuery(object):
                 return result
         return 0
 
-    def convert_value_for_db(self, db_type, value):
-        return self.connection.ops.convert_value_for_db(
-            db_type, value, self.query.get_meta().db_table)
-
-    def convert_value_from_db(self, db_type, value):
-        return self.connection.ops.convert_value_from_db(
-            db_type, value, self.query.get_meta().db_table)
-
 
 class NonrelCompiler(SQLCompiler):
     """
-    Base class for non-relational compilers.
+    Base class for data fetching back-end compilers.
+
+    Note that nonrel compilers derive from the SQLCompiler class and
+    hold a reference to sql.Query, not NonrelQuery.
     """
 
     # ----------------------------------------------
@@ -306,10 +303,9 @@ class NonrelCompiler(SQLCompiler):
     # ----------------------------------------------
     def _make_result(self, entity, fields):
         """
-        Gets and decodes values for the given fields and returns them
-        in a list.
+        Decodes values for the given fields from the database entity.
 
-        The entity is assumed to be a dict using field database column
+        The entity is assumed to be a Mapping using field database column
         names as keys. Decodes values using convert_value_from_db as
         well as the standard convert_values.
         """
@@ -319,10 +315,9 @@ class NonrelCompiler(SQLCompiler):
             if value is NOT_PROVIDED:
                 value = field.get_default()
             else:
-                value = self.connection.ops.convert_value_from_db(
-                    field.db_type(connection=self.connection), value,
-                    self.query.get_meta().db_table)
-                value = self.connection.ops.convert_values(value, field)
+                value = self.convert_value_from_db(
+                    field.db_type(connection=self.connection), value)
+                value = self.query.convert_values(value, field, self.connection)
             if value is None and not field.null:
                 raise IntegrityError("Non-nullable field %s can't be None!"
                                      % field.name)
@@ -331,7 +326,7 @@ class NonrelCompiler(SQLCompiler):
 
     def check_query(self):
         """
-        Checks if a query is supported by the database.
+        Checks if the current query is supported by the database.
 
         TODO: Short description of what is expected not to be available.
         """
@@ -341,7 +336,7 @@ class NonrelCompiler(SQLCompiler):
 
     def get_count(self, check_exists=False):
         """
-        Counts matches using the current filter constraints.
+        Counts objects matching the current filters / constraints.
 
         :param check_exists: Only check if any object matches.
         """
@@ -352,6 +347,7 @@ class NonrelCompiler(SQLCompiler):
         return self.build_query().count(high_mark)
 
     def build_query(self, fields=None):
+        """Prepares a NonrelQuery to be executed on the database."""
         if fields is None:
             fields = self.get_fields()
         query = self.query_class(self, fields)
@@ -419,8 +415,26 @@ class NonrelCompiler(SQLCompiler):
                 descending = not descending
             yield (opts.get_field(field).column, descending)
 
+    def convert_value_for_db(self, db_type, value):
+        """
+        Does type-conversions defined by back-end's DatabaseOperations.
 
-class NonrelInsertCompiler(object):
+        Note that compilers may do conversions without building a
+        NonrelQuery, thus we need to define it here rather than on the
+        query class (as Django does with sql.Query.convert_values).
+        """
+        return self.connection.ops.convert_value_for_db(
+            db_type, value, self.query.get_meta().db_table)
+
+    def convert_value_from_db(self, db_type, value):
+        """
+        Performs deconversions defined by back-end's DatabaseOperations.
+        """
+        return self.connection.ops.convert_value_from_db(
+            db_type, value, self.query.get_meta().db_table)
+
+
+class NonrelInsertCompiler(NonrelCompiler):
     def execute_sql(self, return_id=False):
         data = {}
         for (field, value), column in zip(self.query.values, self.query.columns):
@@ -428,9 +442,8 @@ class NonrelInsertCompiler(object):
                 if not field.null and value is None:
                     raise IntegrityError("You can't set %s (a non-nullable "
                                          "field) to None!" % field.name)
-                value = self.connection.ops.convert_value_for_db(
-                    field.db_type(connection=self.connection), value,
-                    self.query.get_meta().db_table)
+                value = self.convert_value_for_db(
+                    field.db_type(connection=self.connection), value)
             data[column] = value
         return self.insert(data, return_id=return_id)
 
@@ -442,7 +455,7 @@ class NonrelInsertCompiler(object):
         raise NotImplementedError
 
 
-class NonrelUpdateCompiler(object):
+class NonrelUpdateCompiler(NonrelCompiler):
     def execute_sql(self, result_type):
         values = []
         for field, _, value in self.query.values:
@@ -450,9 +463,8 @@ class NonrelUpdateCompiler(object):
                 value = value.prepare_database_save(field)
             else:
                 value = field.get_db_prep_save(value, connection=self.connection)
-            value = self.connection.ops.convert_value_for_db(
-                field.db_type(connection=self.connection), value,
-                self.query.get_meta().db_table)
+            value = self.convert_value_for_db(
+                field.db_type(connection=self.connection), value)
             values.append((field, value))
         return self.update(values)
 
@@ -463,6 +475,6 @@ class NonrelUpdateCompiler(object):
         raise NotImplementedError
 
 
-class NonrelDeleteCompiler(object):
+class NonrelDeleteCompiler(NonrelCompiler):
     def execute_sql(self, result_type=MULTI):
         self.build_query([self.query.get_meta().pk]).delete()
