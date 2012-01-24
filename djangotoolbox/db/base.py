@@ -196,19 +196,25 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         # We store both as lists on default.
         if db_type == 'list' or db_type == 'set':
 
-            # Note that value for a list field lookup may be an iterable
-            # list element, that should be converted as a single value.
+            # Note that value for a list field lookup may be a list
+            # element, that should be converted as a single value using
+            # the list subtype.
             # TODO: What about looking up a list in a list of lists?
             if isinstance(value, (list, tuple, set)):
                 value = [self.convert_value_for_db(db_subtype, subvalue, db_table)
                          for subvalue in value]
+            else:
+                value = self.convert_value_for_db(db_subtype, value, db_table)
 
-        # Convert dict values, pickle and store it as a Blob.
+        # Convert dict values using the db_subtype; also convert
+        # non-Mapping types using the db_type (for lookups).
         # TODO: Only values, not keys?
         elif db_type == 'dict':
             if isinstance(value, dict):
                 value = dict((key, self.convert_value_for_db(db_subtype, subvalue, db_table))
                               for key, subvalue in value.iteritems())
+            else:
+                value = self.convert_value_for_db(db_subtype, value, db_table)
 
         return value
 
