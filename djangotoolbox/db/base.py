@@ -170,7 +170,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             db_subtype = None
         return db_type, db_subtype
 
-    def convert_value_for_db(self, db_type, value, db_table):
+    def convert_value_for_db(self, value, db_type, db_table):
         """
         Converts a standard Python value to a type that can be stored
         or processed by the database.
@@ -179,8 +179,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         "dict" db_type and evaluates lazy objects. You may want to call
         it before doing other back-end specific conversions.
 
-        :param db_type: Name of type or encoding that should be used
         :param value: Value to convert
+        :param db_type: Name of type or encoding that should be used
+        :param db_table: Table name used by the model the value comes
+                         from or refers to (if it's a key).
         """
         db_type, db_subtype = self.parse_db_type(db_type)
 
@@ -199,26 +201,27 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             # Note that value for a list field lookup may be a list
             # element, that should be converted as a single value using
             # the list subtype.
-            # TODO: What about looking up a list in a list of lists?
+            # TODO: What about looking up a list in a list of lists? We
+            #       should rather check if it's a lookup or not here.
             if isinstance(value, (list, tuple, set)):
-                value = [self.convert_value_for_db(db_subtype, subvalue, db_table)
+                value = [self.convert_value_for_db(subvalue, db_subtype, db_table)
                          for subvalue in value]
             else:
-                value = self.convert_value_for_db(db_subtype, value, db_table)
+                value = self.convert_value_for_db(value, db_subtype, db_table)
 
         # Convert dict values using the db_subtype; also convert
         # non-Mapping types using the db_type (for lookups).
         # TODO: Only values, not keys?
         elif db_type == 'dict':
             if isinstance(value, dict):
-                value = dict((key, self.convert_value_for_db(db_subtype, subvalue, db_table))
+                value = dict((key, self.convert_value_for_db(subvalue, db_subtype, db_table))
                               for key, subvalue in value.iteritems())
             else:
-                value = self.convert_value_for_db(db_subtype, value, db_table)
+                value = self.convert_value_for_db(value, db_subtype, db_table)
 
         return value
 
-    def convert_value_from_db(self, db_type, value, db_table):
+    def convert_value_from_db(self, value, db_type, db_table):
         """
         Converts a database type to a standard Python type.
 
@@ -228,19 +231,23 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
         :param db_type: Encoding / decoding procedure identifier
         :param value: A value received from the database
+        :param db_table: Table name used by the model the value comes
+                         from or refers to (if it's a key).
         """
         db_type, db_subtype = self.parse_db_type(db_type)
 
         # Deconvert each value in a list, return a set for the set type.
+        # Note: Lookup values never get deconverted, so we can skip the
+        # the "single value" check here.
         if db_type == 'list' or db_type == 'set':
-            value = [self.convert_value_from_db(db_subtype, subvalue, db_table)
+            value = [self.convert_value_from_db(subvalue, db_subtype, db_table)
                      for subvalue in value]
             if db_type == 'set':
                 value = set(value)
 
         # We may have encoded dict values, so now decode them.
         elif db_type == 'dict':
-            value = dict((key, self.convert_value_from_db(db_subtype, subvalue, db_table))
+            value = dict((key, self.convert_value_from_db(subvalue, db_subtype, db_table))
                           for key, subvalue in value.iteritems())
 
         return value

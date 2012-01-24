@@ -207,10 +207,9 @@ class IterableFieldsTest(TestCase):
             keys = ListField(models.ForeignKey(Model))
         model1 = Model.objects.create()
         model2 = Model.objects.create()
-        ReferenceList.objects.create(keys=[model1.pk, model2.pk])
-        self.assertEqual(
-            Model.objects.get(pk=ReferenceList.objects.get().keys[0]),
-            model1)
+        rl = ReferenceList.objects.create(keys=[model1.pk, model2.pk])
+        self.assertEqual(ReferenceList.objects.get().keys[0], model1.pk)
+        self.assertEqual(len(ReferenceList.objects.filter(keys=model1.pk)), 1)
 
 
 class BaseModel(models.Model):

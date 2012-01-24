@@ -52,15 +52,21 @@ class NonrelQuery(object):
         raise NotImplementedError('Not implemented')
 
     def delete(self):
+        """
+        Called by NonrelDeleteCompiler after it builds a delete query.
+        """
         raise NotImplementedError('Not implemented')
 
     def order_by(self, ordering):
         raise NotImplementedError('Not implemented')
 
-    def add_filter(self, column, lookup_type, negated, db_type, value):
+    def add_filter(self, column, lookup_type, negated, value, field, db_type):
         """
         Adds a single constraint to the query. Called by add_filters for
-        each constraint in the WHERE tree built by Django.
+        each constraint leaf in the WHERE tree built by Django.
+
+        :param field: Field the value comes from, may be None for
+                      comparisons to NULL
         """
         raise NotImplementedError('Not implemented')
 
@@ -68,7 +74,7 @@ class NonrelQuery(object):
         """
         Converts a constraint tree (sql.where.WhereNode) created by
         Django's SQL query machinery to nonrel style filters, calling
-        add_filter for each of them.
+        add_filter for each constraint.
 
         This assumes the database doesn't support alternatives of
         constraints, you should override this method if it does.
@@ -89,15 +95,14 @@ class NonrelQuery(object):
                                 "backend can convert them like this: "
                                 '"not (a OR b) => (not a) AND (not b)".')
 
-        # Recuresively call the method for tree nodes, add a filter for
-        # each leaf.
+        # Recuresively call the method for internal tree nodes, add a
+        # filter for each leaf.
         for child in children:
             if isinstance(child, Node):
                 self.add_filters(child)
                 continue
-
-            column, lookup_type, db_type, value = self._decode_child(child)
-            self.add_filter(column, lookup_type, self._negated, db_type, value)
+            column, lookup_type, value, field, db_type = self._decode_child(child)
+            self.add_filter(column, lookup_type, self._negated, value, field, db_type)
 
         if filters.negated:
             self._negated = not self._negated
@@ -107,31 +112,33 @@ class NonrelQuery(object):
     # ----------------------------------------------
     def _decode_child(self, child):
         """
-        Produces arguments suitable for add_filter from a single WHERE
-        tree leaf.
+        Produces arguments suitable for add_filter from a WHERE tree
+        leaf (a tuple).
         """
         constraint, lookup_type, annotation, value = child
         packed, value = constraint.process(lookup_type, value, self.connection)
         alias, column, db_type = packed
+        field = constraint.field
 
         if alias and alias != self.query.model._meta.db_table:
             raise DatabaseError("This database doesn't support JOINs "
                                 "and multi-table inheritance.")
 
         value = self._normalize_lookup_value(
-            value, annotation, lookup_type, constraint.field)
+            lookup_type, value, field, annotation)
 
-        return column, lookup_type, db_type, value
+        return column, lookup_type, value, field, db_type
 
-    def _normalize_lookup_value(self, value, annotation, lookup_type, field):
+    def _normalize_lookup_value(self, lookup_type, value, field, annotation):
         """
-        Undoes preparations done by Field.get_db_prep_lookup
-        inconvenient for nonrel back-ends.
+        Undoes preparations done by Field.get_db_prep_lookup not
+        suitable for nonrel back-ends and calls value_for_db_* for
+        standard fields that don't do it on their own for lookups.
+
+        TODO: Blank the field method?
 
         TODO: Move to DatabaseOperations too (the code this counters
-              is there)?
-        TODO: Call convert_value_for_db at the end, rather than leave
-              it to subclasses (execute_sql methods do)?
+              or calls is there)?
         """
 
         # Undo Field.get_db_prep_lookup putting most values in a list.
@@ -315,8 +322,7 @@ class NonrelCompiler(SQLCompiler):
             if value is NOT_PROVIDED:
                 value = field.get_default()
             else:
-                value = self.convert_value_from_db(
-                    field.db_type(connection=self.connection), value)
+                value = self.convert_value_from_db(value, field)
                 value = self.query.convert_values(value, field, self.connection)
             if value is None and not field.null:
                 raise IntegrityError("Non-nullable field %s can't be None!"
@@ -415,23 +421,42 @@ class NonrelCompiler(SQLCompiler):
                 descending = not descending
             yield (opts.get_field(field).column, descending)
 
-    def convert_value_for_db(self, db_type, value):
+    def convert_value_for_db(self, value, field, db_type=None):
         """
         Does type-conversions defined by back-end's DatabaseOperations.
+
+        This is mostly a convience wrapper, that only determines the
+        right db_type and db_table, you should typically override
+        DatabaseOperations method rather than this one.
 
         Note that compilers may do conversions without building a
         NonrelQuery, thus we need to define it here rather than on the
         query class (as Django does with sql.Query.convert_values).
-        """
-        return self.connection.ops.convert_value_for_db(
-            db_type, value, self.query.get_meta().db_table)
 
-    def convert_value_from_db(self, db_type, value):
+        :param value: Value to convert
+        :param field: Field the value comes from
+        :param db_type: If skipped, db_type from the field is used
+                        (meant for lookups that compute it earlier)
+
+        TODO: db_type argument can be probably safely removed (just
+              use None when the field is not known, that is for NULL
+              comparisons).
+        """
+        if db_type is None:
+            db_type = field.db_type(connection=self.connection)
+        return self.connection.ops.convert_value_for_db(value, db_type,
+            field.model._meta.db_table)
+
+    def convert_value_from_db(self, value, field, db_type=None):
         """
         Performs deconversions defined by back-end's DatabaseOperations.
+
+        See convert_value_for_db.
         """
-        return self.connection.ops.convert_value_from_db(
-            db_type, value, self.query.get_meta().db_table)
+        if db_type is None:
+            db_type = field.db_type(connection=self.connection)
+        return self.connection.ops.convert_value_from_db(value, db_type,
+            field.model._meta.db_table)
 
 
 class NonrelInsertCompiler(NonrelCompiler):
@@ -442,8 +467,7 @@ class NonrelInsertCompiler(NonrelCompiler):
                 if not field.null and value is None:
                     raise IntegrityError("You can't set %s (a non-nullable "
                                          "field) to None!" % field.name)
-                value = self.convert_value_for_db(
-                    field.db_type(connection=self.connection), value)
+                value = self.convert_value_for_db(value, field)
             data[column] = value
         return self.insert(data, return_id=return_id)
 
@@ -463,8 +487,7 @@ class NonrelUpdateCompiler(NonrelCompiler):
                 value = value.prepare_database_save(field)
             else:
                 value = field.get_db_prep_save(value, connection=self.connection)
-            value = self.convert_value_for_db(
-                field.db_type(connection=self.connection), value)
+            value = self.convert_value_for_db(value, field)
             values.append((field, value))
         return self.update(values)
 
