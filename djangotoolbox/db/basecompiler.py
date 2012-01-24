@@ -3,6 +3,7 @@ import random
 
 from django.conf import settings
 from django.db.models.fields import NOT_PROVIDED, DecimalField
+from django.db.models.fields.related import RelatedField
 from django.db.models.sql import aggregates as sqlaggregates
 from django.db.models.sql.compiler import SQLCompiler
 from django.db.models.sql.constants import LOOKUP_SEP, MULTI, SINGLE
@@ -426,7 +427,7 @@ class NonrelCompiler(SQLCompiler):
         Does type-conversions defined by back-end's DatabaseOperations.
 
         This is mostly a convience wrapper, that only determines the
-        right db_type and db_table, you should typically override
+        db_type and the right db_table, you should typically override
         DatabaseOperations method rather than this one.
 
         Note that compilers may do conversions without building a
@@ -439,13 +440,22 @@ class NonrelCompiler(SQLCompiler):
                         (meant for lookups that compute it earlier)
 
         TODO: db_type argument can be probably safely removed (just
-              use None when the field is not known, that is for NULL
+              use None when the field is not known -- for NULL
               comparisons).
         """
         if db_type is None:
             db_type = field.db_type(connection=self.connection)
-        return self.connection.ops.convert_value_for_db(value, db_type,
-            field.model._meta.db_table)
+
+        # For ForeignKey, OneToOneField, and ManyToManyField use the
+        # table of the model the field refers to (in case the back-end
+        # would like to use the table name for key creation).
+        if isinstance(field, RelatedField):
+            db_table = field.rel.to._meta.db_table
+        else:
+            db_table = field.model._meta.db_table
+
+        return self.connection.ops.convert_value_for_db(
+            value, db_type, db_table)
 
     def convert_value_from_db(self, value, field, db_type=None):
         """
@@ -455,8 +465,12 @@ class NonrelCompiler(SQLCompiler):
         """
         if db_type is None:
             db_type = field.db_type(connection=self.connection)
-        return self.connection.ops.convert_value_from_db(value, db_type,
-            field.model._meta.db_table)
+        if isinstance(field, RelatedField):
+            db_table = field.rel.to._meta.db_table
+        else:
+            db_table = field.model._meta.db_table
+        return self.connection.ops.convert_value_from_db(
+            value, db_type, db_table)
 
 
 class NonrelInsertCompiler(NonrelCompiler):
