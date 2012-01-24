@@ -66,11 +66,6 @@ class AbstractIterableField(models.Field):
         if issubclass(metaclass, models.SubfieldBase):
             setattr(cls, self.name, _HandleAssignment(self))
 
-    def db_type(self, connection):
-        db_type = super(AbstractIterableField, self).db_type(connection=connection)
-        item_db_type = self.item_field.db_type(connection=connection)
-        return '%s:%s' % (db_type, item_db_type)
-
     def _convert(self, func, values, *args, **kwargs):
         if isinstance(values, (list, tuple, set)):
             return self._type(func(value, *args, **kwargs) for value in values)

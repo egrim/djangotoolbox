@@ -2,6 +2,7 @@ from django.db.backends.creation import BaseDatabaseCreation
 
 
 class NonrelDatabaseCreation(BaseDatabaseCreation):
+
     # These "types" are used by back-end conversion routines to decide
     # how to convert data for or from the database. Type is here an
     # identifier of an encoding / decoding procedure to use.
@@ -46,7 +47,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'URLField':          'text',
         'XMLField':          'longtext',
 
-        # Mappings for fields provided by nonrel. You may use "list" 
+        # Mappings for fields provided by nonrel. You may use "list"
         # for SetFields, but not DictFields. TODO: Doesn't seem hard to handle.
         'RawField':          'raw',
         'BlobField':         'blob',
@@ -57,24 +58,68 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'EmbeddedModelField': 'dict',
     }
 
+    def db_info(self, field):
+        """
+        Returns a tuple of (db_type, db_table, db_subinfo) containing
+        all info needed to encode field's value for a nonrel database.
+        Used by convert_value_to/from_db.
+
+        We put db_table alongside field db_type -- to allow back-ends
+        having separate key spaces for different tables to create keys
+        refering to the right table.
+
+        For collection fields (ListField etc.) we also need db_info
+        of elements -- that's the third element of the tuple. Currently
+        for untyped collections (with values not tied to fields) we do
+        almost no encoding / decoding of elements.
+
+        Consider the following example:
+
+            class Blog(models.Model):
+                posts = ListField(models.ForeignKey(Post))
+
+            clas Post(models.Model)
+                pass
+
+        a db_info for the 'posts' field could be:
+
+            ('list', 'blog', ('key', 'post', None))
+        """
+
+        # For ForeignKey, OneToOneField and ManyToManyField use the
+        # table of the model the field refers to.
+        if field.rel is not None:
+            db_table = field.rel.to._meta.db_table
+        else:
+            db_table = field.model._meta.db_table
+
+        # Compute db_subinfo from item_field of iterable fields.
+        try:
+            db_subinfo = self.db_info(field.item_field)
+        except AttributeError:
+            db_subinfo = None
+
+        return self.db_type(field), db_table, db_subinfo
+
     def db_type(self, field):
         """
-        If the databases has a special key type, return "key" for all
-        primary key fields independent of the field class, otherwise
-        use original Django's logic.
+        If the databases has a special key type, returns "key" for
+        all primary key fields and related fields independent of the
+        field class; otherwise uses original Django's logic.
         """
-        if self.connection.features.has_key_type and field.primary_key:
+        if self.connection.features.has_key_type and \
+            (field.primary_key or field.rel is not None):
             return 'key'
         return super(NonrelDatabaseCreation, self).db_type(field)
 
     def related_db_type(self, field):
         """
-        If the databases has a special key type, use "key" db_type for
-        foreign keys and other references.
+        TODO: Doesn't seem necessary any longer.
         """
         if self.connection.features.has_key_type:
-            return 'key'
+             return 'key'
         return super(NonrelDatabaseCreation, self).db_type(field)
+#        return self.db_type(field)
 
     def sql_create_model(self, model, style, known_models=set()):
         """

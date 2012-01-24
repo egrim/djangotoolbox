@@ -157,20 +157,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             raise NotImplementedError('This database does not support %r '
                                       'aggregates' % type(aggregate))
 
-    def parse_db_type(self, db_type):
-        """
-        Separates elements of db_type into a tuple. Used for separating
-        type of elements for iterable fields.
-
-        TODO: Do this in NonrelDatabaseCreation and pass tuples instead?
-        """
-        try:
-            db_type, db_subtype = db_type.split(':', 1)
-        except (AttributeError, ValueError):
-            db_subtype = None
-        return db_type, db_subtype
-
-    def convert_value_for_db(self, value, db_type, db_table):
+    def convert_value_for_db(self, value, db_info):
         """
         Converts a standard Python value to a type that can be stored
         or processed by the database.
@@ -179,12 +166,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         "dict" db_type and evaluates lazy objects. You may want to call
         it before doing other back-end specific conversions.
 
-        :param value: Value to convert
-        :param db_type: Name of type or encoding that should be used
-        :param db_table: Table name used by the model the value comes
-                         from or refers to (if it's a key).
+        :param value: A value to be passed to the database driver
+        :param db_info: A 3-tuple with (db_type, db_table, db_subinfo)
         """
-        db_type, db_subtype = self.parse_db_type(db_type)
+        db_type, db_table, db_subinfo = db_info or (None, None, None)
 
         # Force evaluation of lazy objects (e.g. lazy translation strings).
         # Some back-ends pass values directly to the database driver, which
@@ -198,30 +183,30 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         # We store both as lists on default.
         if db_type == 'list' or db_type == 'set':
 
-            # Note that value for a list field lookup may be a list
+            # Note that value for a ListField and alike may be a list
             # element, that should be converted as a single value using
-            # the list subtype.
+            # the db_subinfo.
             # TODO: What about looking up a list in a list of lists? We
             #       should rather check if it's a lookup or not here.
             if isinstance(value, (list, tuple, set)):
-                value = [self.convert_value_for_db(subvalue, db_subtype, db_table)
+                value = [self.convert_value_for_db(subvalue, db_subinfo)
                          for subvalue in value]
             else:
-                value = self.convert_value_for_db(value, db_subtype, db_table)
+                value = self.convert_value_for_db(value, db_subinfo)
 
         # Convert dict values using the db_subtype; also convert
-        # non-Mapping types using the db_type (for lookups).
+        # non-Mapping types using the db_subinfo (for lookups).
         # TODO: Only values, not keys?
         elif db_type == 'dict':
             if isinstance(value, dict):
-                value = dict((key, self.convert_value_for_db(subvalue, db_subtype, db_table))
+                value = dict((key, self.convert_value_for_db(subvalue, db_subinfo))
                               for key, subvalue in value.iteritems())
             else:
-                value = self.convert_value_for_db(value, db_subtype, db_table)
+                value = self.convert_value_for_db(value, db_subinfo)
 
         return value
 
-    def convert_value_from_db(self, value, db_type, db_table):
+    def convert_value_from_db(self, value, db_info):
         """
         Converts a database type to a standard Python type.
 
@@ -229,25 +214,23 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         encoding here. This implementation only recuresively deconverts
         elements of iterables (for "list", "set" or "dict" db_type).
 
-        :param db_type: Encoding / decoding procedure identifier
         :param value: A value received from the database
-        :param db_table: Table name used by the model the value comes
-                         from or refers to (if it's a key).
+        :param db_info: A 3-tuple with (db_type, db_table, db_subinfo)
         """
-        db_type, db_subtype = self.parse_db_type(db_type)
+        db_type, db_table, db_subinfo = db_info or (None, None, None)
 
         # Deconvert each value in a list, return a set for the set type.
         # Note: Lookup values never get deconverted, so we can skip the
         # the "single value" check here.
         if db_type == 'list' or db_type == 'set':
-            value = [self.convert_value_from_db(subvalue, db_subtype, db_table)
+            value = [self.convert_value_from_db(subvalue, db_subinfo)
                      for subvalue in value]
             if db_type == 'set':
                 value = set(value)
 
         # We may have encoded dict values, so now decode them.
         elif db_type == 'dict':
-            value = dict((key, self.convert_value_from_db(subvalue, db_subtype, db_table))
+            value = dict((key, self.convert_value_from_db(subvalue, db_subinfo))
                           for key, subvalue in value.iteritems())
 
         return value

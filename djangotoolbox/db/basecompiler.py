@@ -3,7 +3,6 @@ import random
 
 from django.conf import settings
 from django.db.models.fields import NOT_PROVIDED, DecimalField
-from django.db.models.fields.related import RelatedField
 from django.db.models.sql import aggregates as sqlaggregates
 from django.db.models.sql.compiler import SQLCompiler
 from django.db.models.sql.constants import LOOKUP_SEP, MULTI, SINGLE
@@ -61,13 +60,18 @@ class NonrelQuery(object):
     def order_by(self, ordering):
         raise NotImplementedError('Not implemented')
 
-    def add_filter(self, column, lookup_type, negated, value, field, db_type):
+    def add_filter(self, column, lookup_type, negated, value, field):
         """
         Adds a single constraint to the query. Called by add_filters for
         each constraint leaf in the WHERE tree built by Django.
 
+        :param column: Database property name
+        :param lookup_type: Django's lookup name (e.g. "startswith")
+        :param negated: Is the lookup negated
+        :param value: Lookup argument, e.g. value to compare with
         :param field: Field the value comes from, may be None for
-                      comparisons to NULL
+                      comparisons to NULL; only use it to learn
+                      properties of value, don't call
         """
         raise NotImplementedError('Not implemented')
 
@@ -102,8 +106,8 @@ class NonrelQuery(object):
             if isinstance(child, Node):
                 self.add_filters(child)
                 continue
-            column, lookup_type, value, field, db_type = self._decode_child(child)
-            self.add_filter(column, lookup_type, self._negated, value, field, db_type)
+            column, lookup_type, value, field = self._decode_child(child)
+            self.add_filter(column, lookup_type, self._negated, value, field)
 
         if filters.negated:
             self._negated = not self._negated
@@ -116,6 +120,8 @@ class NonrelQuery(object):
         Produces arguments suitable for add_filter from a WHERE tree
         leaf (a tuple).
         """
+        # TODO: Call get_db_prep_lookup directly, constrain.process
+        # doesn't do much more.
         constraint, lookup_type, annotation, value = child
         packed, value = constraint.process(lookup_type, value, self.connection)
         alias, column, db_type = packed
@@ -128,7 +134,7 @@ class NonrelQuery(object):
         value = self._normalize_lookup_value(
             lookup_type, value, field, annotation)
 
-        return column, lookup_type, value, field, db_type
+        return column, lookup_type, value, field
 
     def _normalize_lookup_value(self, lookup_type, value, field, annotation):
         """
@@ -422,55 +428,32 @@ class NonrelCompiler(SQLCompiler):
                 descending = not descending
             yield (opts.get_field(field).column, descending)
 
-    def convert_value_for_db(self, value, field, db_type=None):
+    def convert_value_for_db(self, value, field):
         """
         Does type-conversions defined by back-end's DatabaseOperations.
 
-        This is mostly a convience wrapper, that only determines the
-        db_type and the right db_table, you should typically override
-        DatabaseOperations method rather than this one.
+        This is a convience wrapper, that only asks NonrelDatabaseCreation
+        to compute db_info for the given field; you should typically
+        override the DatabaseOperations method rather than this one.
 
         Note that compilers may do conversions without building a
         NonrelQuery, thus we need to define it here rather than on the
         query class (as Django does with sql.Query.convert_values).
 
-        :param value: Value to convert
-        :param field: Field the value comes from
-        :param db_type: If skipped, db_type from the field is used
-                        (meant for lookups that compute it earlier)
-
-        TODO: db_type argument can be probably safely removed (just
-              use None when the field is not known -- for NULL
-              comparisons).
+        :param value: A value to be passed to the database driver
+        :param field: The field the value comes from
         """
-        if db_type is None:
-            db_type = field.db_type(connection=self.connection)
-
-        # For ForeignKey, OneToOneField, and ManyToManyField use the
-        # table of the model the field refers to (in case the back-end
-        # would like to use the table name for key creation).
-        if isinstance(field, RelatedField):
-            db_table = field.rel.to._meta.db_table
-        else:
-            db_table = field.model._meta.db_table
-
         return self.connection.ops.convert_value_for_db(
-            value, db_type, db_table)
+            value, self.connection.creation.db_info(field))
 
-    def convert_value_from_db(self, value, field, db_type=None):
+    def convert_value_from_db(self, value, field):
         """
         Performs deconversions defined by back-end's DatabaseOperations.
 
         See convert_value_for_db.
         """
-        if db_type is None:
-            db_type = field.db_type(connection=self.connection)
-        if isinstance(field, RelatedField):
-            db_table = field.rel.to._meta.db_table
-        else:
-            db_table = field.model._meta.db_table
         return self.connection.ops.convert_value_from_db(
-            value, db_type, db_table)
+            value, self.connection.creation.db_info(field))
 
 
 class NonrelInsertCompiler(NonrelCompiler):
