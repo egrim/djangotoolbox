@@ -4,6 +4,8 @@ from django.db.backends import BaseDatabaseFeatures, BaseDatabaseOperations, \
     BaseDatabaseWrapper, BaseDatabaseClient, BaseDatabaseValidation, \
     BaseDatabaseIntrospection
 from django.utils.functional import Promise
+from django.utils.safestring import EscapeString, EscapeUnicode, SafeString, \
+    SafeUnicode
 
 
 class NonrelDatabaseFeatures(BaseDatabaseFeatures):
@@ -163,20 +165,31 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         or processed by the database.
 
         This implementatin only converts values with "list", "set" or
-        "dict" db_type and evaluates lazy objects. You may want to call
-        it before doing other back-end specific conversions.
+        "dict", evaluates lazy objects and Django's Escape/SafeData.
+        You may want to call it before doing other back-end specific
+        conversions.
 
         :param value: A value to be passed to the database driver
         :param db_info: A 3-tuple with (db_type, db_table, db_subinfo)
         """
         db_type, db_table, db_subinfo = db_info or (None, None, None)
 
-        # Force evaluation of lazy objects (e.g. lazy translation strings).
-        # Some back-ends pass values directly to the database driver, which
-        # may fail if it relies on type inspection and gets a functional proxy.
-        # This code relies on __unicode_ cast in django.utils.functional just
-        # evaluating the wrapped function and doing nothing more.
+        # Force evaluation of lazy objects (e.g. lazy translation
+        # strings).
+        # Some back-ends pass values directly to the database driver,
+        # which may fail if it relies on type inspection and gets a
+        # functional proxy.
+        # This code relies on unicode cast in django.utils.functional
+        # just evaluating the wrapped function and doing nothing more.
         if isinstance(value, Promise):
+             value = unicode(value)
+
+        # Django wraps strings marked as safe or needed escaping,
+        # convert them to just strings for type-inspecting back-ends.
+        # See: django.utils.safestring.py.
+        if isinstance(value, (SafeString, EscapeString)):
+             value = str(value)
+        if isinstance(value, (SafeUnicode, EscapeUnicode)):
              value = unicode(value)
 
         # Convert all values in a list or set using its subtype.
@@ -199,8 +212,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         # TODO: Only values, not keys?
         elif db_type == 'dict':
             if isinstance(value, dict):
-                value = dict((key, self.convert_value_for_db(subvalue, db_subinfo))
-                              for key, subvalue in value.iteritems())
+                value = dict(
+                    (key, self.convert_value_for_db(subvalue, db_subinfo))
+                    for key, subvalue in value.iteritems())
             else:
                 value = self.convert_value_for_db(value, db_subinfo)
 
@@ -230,8 +244,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
         # We may have encoded dict values, so now decode them.
         elif db_type == 'dict':
-            value = dict((key, self.convert_value_from_db(subvalue, db_subinfo))
-                          for key, subvalue in value.iteritems())
+            value = dict(
+                (key, self.convert_value_from_db(subvalue, db_subinfo))
+                for key, subvalue in value.iteritems())
 
         return value
 
