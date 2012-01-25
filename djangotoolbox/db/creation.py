@@ -3,9 +3,11 @@ from django.db.backends.creation import BaseDatabaseCreation
 
 class NonrelDatabaseCreation(BaseDatabaseCreation):
 
-    # These "types" are used by back-end conversion routines to decide
-    # how to convert data for or from the database. Type is here an
-    # identifier of an encoding / decoding procedure to use.
+    # "Types" used by back-end conversion routines to decide how to
+    # convert data for or from the database. Type is understood here
+    # a bit differently than in vanilla Django -- it should be read
+    # as a identifier of an encoding / decoding procedure to use, 
+    # rather than just a database column type.
     data_types = {
 
         # NoSQL databases usually have specific concepts of keys. For

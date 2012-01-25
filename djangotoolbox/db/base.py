@@ -13,7 +13,8 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
     # NoSQL databases usually return a key after saving a new object.
     can_return_id_from_insert = True
 
-    # TODO: Why? Doesn't seem true in general.
+    # TODO: Why? Doesn't seem true in general (probably changes Django
+    # behaviour, but needs to be verified).
     supports_date_lookup_using_string = False
     supports_timezones = False
 
@@ -23,10 +24,10 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
     supports_select_related = False
     supports_deleting_related_objects = False
 
-    # Does the database use one special type for all keys and references?
-    # If set to True, all primary keys, foreign keys and other references
-    # will get "key" db_type, otherwise it will be determined using original
-    # Django's logic.
+    # Does the database use special type for all keys and references?
+    # If set to True, all primary keys, foreign keys and other
+    # references will get "key" db_type, otherwise the db_type will be
+    # determined # using the original Django's logic.
     has_key_type = True
 
     # Can a dictionary be saved / fetched from the database.
@@ -49,17 +50,16 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     Django normally handles conversions for the database by providing
     BaseDatabaseOperations.value_to_db_* / convert_values methods,
     but there are some problems with them:
-    -- there are no methods for string / integer conversion or for
-       nonrel specific fields (e.g. iterables, blobs);
-    -- some conversions are not specific to a field kind and can't rely
-       on field internal_type (e.g. key conversions);
-    -- some standard fields do not call value_to_db_* for each
-       operation (e.g. DecimalField only defines get_db_value_save, so
-       the conversion is not applied to lookup values).
+    -- some preparations need to be done for all values or for values
+       of a particular "kind" (e.g. lazy objects evaluation or casting
+       strings to standard types);
+    -- some conversions need more info about the field or model the
+       value comes from (e.g. key conversions);
+    -- we need to handle nonrel specific fields (collections, blobs).
 
     Prefer standard methods when the conversion is specific to a
-    field kind and these methods when you can convert any value of
-    a type.
+    field kind and the added convert_value_for/from_db methods when you
+    can convert any value of a "type".
 
     Please note, that after changes to type conversions, data saved
     using preexisting methods needs to be handled.
@@ -98,12 +98,15 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
     def value_to_db_auto(self, value):
         """
-        If the database has its own key type it's better to leave any
+        Assuming that the database has its own key type, leaves any
         conversions to the back-end.
+
+        Note that Django can pass a string representation of the value
+        instead of the value itself (after receiving it as a query
+        parameter for example), so you'll likely need to limit
+        your AutoFields in a way that makes str(value) reversible.
         """
-        if self.connection.features.has_key_type:
-            return value
-        return super(NonrelDatabaseOperations, self).value_to_db_auto(value)
+        return value
 
     def value_to_db_date(self, value):
         """
