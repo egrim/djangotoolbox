@@ -3,6 +3,7 @@ import datetime
 from django.db.backends import BaseDatabaseFeatures, BaseDatabaseOperations, \
     BaseDatabaseWrapper, BaseDatabaseClient, BaseDatabaseValidation, \
     BaseDatabaseIntrospection
+from django.db.utils import DatabaseError
 from django.utils.functional import Promise
 from django.utils.safestring import EscapeString, EscapeUnicode, SafeString, \
     SafeUnicode
@@ -29,6 +30,11 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
     # references will get "key" db_type, otherwise the db_type will be
     # determined # using the original Django's logic.
     has_key_type = True
+
+    # Can primary_key be used on any field? Without encoding usually
+    # only a very limited set of types is acceptable for keys.
+    # TODO: Move to core and use to skip unsuitable Django tests.
+    supports_primary_key = False
 
     # Can a dictionary be saved / fetched from the database.
     supports_dicts = False
@@ -164,6 +170,28 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         if not isinstance(aggregate, Count):
             raise NotImplementedError('This database does not support %r '
                                       'aggregates' % type(aggregate))
+
+    def encode_for_db_key(self, value, db_info):
+        """
+        Converts value to be used as a key to an acceptable type.
+        On default we do no encoding, only allowing key values directly
+        acceptable by the back-end.
+
+        The conversion has to be reversible given the field type,
+        encoding should preserve comparisons.
+
+        Use this to expand the set of fields that can be used as
+        primary keys, return value sutiable for a key rather than
+        a key itself.
+        """
+        raise DatabaseError(
+            '{0} may not be used as primary key field'.format(db_info[0]))
+
+    def decode_from_db_key(self, value, db_info):
+        """
+        Decodes value previously encoded for a key.
+        """
+        return value
 
     def convert_value_for_db(self, value, db_info):
         """
