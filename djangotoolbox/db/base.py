@@ -55,6 +55,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
        strings to standard types);
     -- some conversions need more info about the field or model the
        value comes from (e.g. key conversions);
+    -- there are no value_to_db_* methods for some value types (bools);
     -- we need to handle nonrel specific fields (collections, blobs).
 
     Prefer standard methods when the conversion is specific to a
@@ -63,6 +64,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
     Please note, that after changes to type conversions, data saved
     using preexisting methods needs to be handled.
+
+    TODO: Consider also adding value_to/from_db_key(value, field_type).
     """
     def __init__(self, connection):
         self.connection = connection
@@ -173,9 +176,11 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         conversions.
 
         :param value: A value to be passed to the database driver
-        :param db_info: A 3-tuple with (db_type, db_table, db_subinfo)
+        :param db_info: A 4-tuple with (field_type, db_type, db_table,
+                        db_subinfo)
         """
-        db_type, db_table, db_subinfo = db_info or (None, None, None)
+        field_type, db_type, db_table, db_subinfo = db_info or \
+           (None, None, None, None)
 
         # Force evaluation of lazy objects (e.g. lazy translation
         # strings).
@@ -232,9 +237,11 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         elements of iterables (for "list", "set" or "dict" db_type).
 
         :param value: A value received from the database
-        :param db_info: A 3-tuple with (db_type, db_table, db_subinfo)
+        :param db_info: A 4-tuple with (field_type, db_type, db_table,
+                        db_subinfo)
         """
-        db_type, db_table, db_subinfo = db_info or (None, None, None)
+        field_type, db_type, db_table, db_subinfo = db_info or \
+           (None, None, None, None)
 
         # Deconvert each value in a list, return a set for the set type.
         # Note: Lookup values never get deconverted, so we can skip the

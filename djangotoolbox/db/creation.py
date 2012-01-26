@@ -62,9 +62,12 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
 
     def db_info(self, field):
         """
-        Returns a tuple of (db_type, db_table, db_subinfo) containing
-        all info needed to encode field's value for a nonrel database.
-        Used by convert_value_to/from_db.
+        Returns a tuple of (field_type, db_type, db_table, db_subinfo)
+        containing all info needed to encode field's value for a nonrel
+        database. Used by convert_value_to/from_db.
+
+        The first argument is just the field's internal type, it is
+        needed to do what missing value_to_db_* methods could do.
 
         We put db_table alongside field db_type -- to allow back-ends
         having separate key spaces for different tables to create keys
@@ -85,8 +88,16 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
 
         a db_info for the 'posts' field could be:
 
-            ('list', 'blog', ('key', 'post', None))
+            ('ListField', 'list', 'blog', ('key', 'post', None))
+
+        TODO: Optimzation: memoize the tuple, or extend convert_value_*
+              to accept lists of values if the same type.
         """
+
+        # Field type is usually just the base field class name, while
+        # db_type is usually expected value's type or "key".
+        field_type = field.get_internal_type()
+        db_type = self.db_type(field)
 
         # For ForeignKey, OneToOneField and ManyToManyField use the
         # table of the model the field refers to.
@@ -101,7 +112,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         except AttributeError:
             db_subinfo = None
 
-        return self.db_type(field), db_table, db_subinfo
+        return field_type, db_type, db_table, db_subinfo
 
     def db_type(self, field):
         """

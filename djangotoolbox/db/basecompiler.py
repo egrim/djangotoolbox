@@ -434,7 +434,7 @@ class NonrelCompiler(SQLCompiler):
 
         This is a convience wrapper, that only asks NonrelDatabaseCreation
         to compute db_info for the given field; you should typically
-        override the DatabaseOperations method rather than this one.
+        override the DatabaseOperations method, but only call this one.
 
         Note that compilers may do conversions without building a
         NonrelQuery, thus we need to define it here rather than on the
