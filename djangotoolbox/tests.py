@@ -447,7 +447,7 @@ class OrderByTest(TestCase):
 class LazyObjectsTest(TestCase):
     def test_translation(self):
         """
-         Using a lazy translation call should work just the same as
+        Using a lazy translation call should work just the same as
         a non-lazy one (or a plain string).
         """
         from django.utils.translation import ugettext_lazy
@@ -465,3 +465,33 @@ class LazyObjectsTest(TestCase):
         self.assertEqual(list(String.objects.filter(s__gte='b')), [b])
         self.assertEqual(String.objects.get(s=ugettext_lazy('b')), b)
         self.assertEqual(list(String.objects.filter(s__gte=ugettext_lazy('b'))), [b])
+
+    def test_marked_strings(self):
+        """
+        Check that strings marked as safe or needing escaping do not
+        confuse the back-end.
+        """
+        from django.utils.safestring import mark_safe, mark_for_escaping
+        class String(models.Model):
+            s = models.CharField(max_length=20)
+        a = String.objects.create(s='a')
+        b = String.objects.create(s=mark_safe('b'))
+        c = String.objects.create(s=mark_for_escaping('c'))
+        self.assertEqual(String.objects.get(s='a'), a)
+        self.assertEqual(list(String.objects.filter(s__startswith='a')), [a])
+        self.assertEqual(String.objects.get(s=mark_safe('a')), a)
+        self.assertEqual(list(String.objects.filter(s__startswith=mark_safe('a'))), [a])
+        self.assertEqual(String.objects.get(s=mark_for_escaping('a')), a)
+        self.assertEqual(list(String.objects.filter(s__startswith=mark_for_escaping('a'))), [a])
+        self.assertEqual(String.objects.get(s='b'), b)
+        self.assertEqual(list(String.objects.filter(s__startswith='b')), [b])
+        self.assertEqual(String.objects.get(s=mark_safe('b')), b)
+        self.assertEqual(list(String.objects.filter(s__startswith=mark_safe('b'))), [b])
+        self.assertEqual(String.objects.get(s=mark_for_escaping('b')), b)
+        self.assertEqual(list(String.objects.filter(s__startswith=mark_for_escaping('b'))), [b])
+        self.assertEqual(String.objects.get(s='c'), c)
+        self.assertEqual(list(String.objects.filter(s__startswith='c')), [c])
+        self.assertEqual(String.objects.get(s=mark_safe('c')), c)
+        self.assertEqual(list(String.objects.filter(s__startswith=mark_safe('c'))), [c])
+        self.assertEqual(String.objects.get(s=mark_for_escaping('c')), c)
+        self.assertEqual(list(String.objects.filter(s__startswith=mark_for_escaping('c'))), [c])    
