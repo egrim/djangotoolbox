@@ -69,9 +69,11 @@ class NonrelQuery(object):
         :param lookup_type: Django's lookup name (e.g. "startswith")
         :param negated: Is the lookup negated
         :param value: Lookup argument, e.g. value to compare with
-        :param field: Field the value comes from, may be None for
-                      comparisons to NULL; only use it to learn
-                      properties of value, don't call
+        :param field: Field the value comes from; only use it to learn
+                      properties of value.
+
+        TODO: Rename, this methods deals with constraints rather than
+              what Django calls lookups.
         """
         raise NotImplementedError('Not implemented')
 
@@ -83,6 +85,10 @@ class NonrelQuery(object):
 
         This assumes the database doesn't support alternatives of
         constraints, you should override this method if it does.
+
+        TODO: Simulate both conjunctions and alternatives in general
+              let GAE override conjunctions not to split them into
+              multiple queries.
         """
         if filters.negated:
             self._negated = not self._negated
@@ -120,6 +126,7 @@ class NonrelQuery(object):
         Produces arguments suitable for add_filter from a WHERE tree
         leaf (a tuple).
         """
+
         # TODO: Call get_db_prep_lookup directly, constrain.process
         # doesn't do much more.
         constraint, lookup_type, annotation, value = child
@@ -142,8 +149,7 @@ class NonrelQuery(object):
         suitable for nonrel back-ends and calls value_for_db_* for
         standard fields that don't do it on their own for lookups.
 
-        TODO: Blank the field method?
-
+        TODO: Blank Field.get_db_prep_lookup instead?
         TODO: Move to DatabaseOperations too (the code this counters
               or calls is there)?
         """
@@ -183,13 +189,14 @@ class NonrelQuery(object):
 
     def _get_children(self, children):
         """
-        Filters out WHERE tree nodes not needed for nonrel queries.
+        Filters out nodes of the given contraint tree not needed for
+        nonrel queries.
         """
-
-        # Filter out nodes that were automatically added by sql.Query,
-        # but are not necessary with emulated negation handling code.
         result = []
         for child in children:
+
+            # Remove leafs that were automatically added by
+            # sql.Query.add_filter to handle negations of outer joins.
             if isinstance(child, tuple):
                 constraint = child[0]
                 lookup_type = child[1]
@@ -271,8 +278,8 @@ class NonrelCompiler(SQLCompiler):
     """
     Base class for data fetching back-end compilers.
 
-    Note that nonrel compilers derive from the SQLCompiler class and
-    hold a reference to sql.Query, not NonrelQuery.
+    Note that nonrel compilers derive from the sql.SQLCompiler and thus
+    hold a reference to a sql.Query, not a NonrelQuery.
     """
 
     # ----------------------------------------------

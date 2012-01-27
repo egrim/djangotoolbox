@@ -29,8 +29,17 @@ class _HandleAssignment(object):
 
 
 class RawField(models.Field):
-    """ Generic field to store anything your database backend allows you to. """
-    pass
+    """
+    Generic field to store anything your database backend allows you to.
+    No validation or conversions are done for this field.
+    """
+    def get_internal_type(self):
+        """
+        Returns this field's kind. Nonrel fields are meant to extend
+        the set of standard fields, so fields subclassing them should
+        get the same internal type, rather than their own class name.
+        """
+        return 'RawField'
 
 
 class AbstractIterableField(models.Field):
@@ -134,6 +143,9 @@ class ListField(AbstractIterableField):
                             "not of type %r" %  type(self.ordering))
         super(ListField, self).__init__(*args, **kwargs)
 
+    def get_internal_type(self):
+        return 'ListField'
+
     def pre_save(self, model_instance, add):
         values = getattr(model_instance, self.attname)
         if values is None:
@@ -149,6 +161,10 @@ class SetField(AbstractIterableField):
     """
     _type = set
 
+    def get_internal_type(self):
+        return 'SetField'
+
+
 
 class DictField(AbstractIterableField):
     """
@@ -160,6 +176,9 @@ class DictField(AbstractIterableField):
     Depending on the backend, keys that aren't strings might not be allowed.
     """
     _type = dict
+
+    def get_internal_type(self):
+        return 'DictField'
 
     def _convert(self, func, values, *args, **kwargs):
         if values is None:
@@ -182,6 +201,9 @@ class BlobField(models.Field):
     In the latter case, the object has to provide a ``read`` method from which
     the blob is read.
     """
+    def get_internal_type(self):
+        return 'BlobField'
+
     def formfield(self, **kwargs):
         # A file widget is provided, but use model FileField or ImageField
         # for storing specific files most of the time
@@ -217,6 +239,9 @@ class EmbeddedModelField(models.Field):
         self.embedded_model = model
         kwargs.setdefault('default', None)
         super(EmbeddedModelField, self).__init__(*args, **kwargs)
+
+    def get_internal_type(self):
+        return 'EmbeddedModelField'
 
     def _set_model(self, model):
         # We need to know the model to generate a valid key for the lookup but
