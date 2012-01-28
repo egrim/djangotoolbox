@@ -14,53 +14,51 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         # example, GAE has the db.Key class, MongoDB driver only allows
         # ObjectIds, Redis uses strings, while Cassandra supports
         # different types (including binary data).
-        'AutoField':         'key',
-        'RelatedAutoField':  'key',
-        'ForeignKey':        'key',
-        'OneToOneField':     'key',
-        'ManyToManyField':   'key',
+        'AutoField':                  'key',
+        'RelatedAutoField':           'key',
+        'ForeignKey':                 'key',
+        'OneToOneField':              'key',
+        'ManyToManyField':            'key',
 
-        # Standard field types, more or less suitable for databases
+        # Standard field types, more or less suitable fora  database
         # (or its client / driver) being able to directly store or
-        # process Python objects, but having separate types for storing
-        # short and long strings.
-        # TODO: Use unicode rather than text/longtext.
-        'BigIntegerField':   'long',
-        'BooleanField':      'bool',
-        'CharField':         'text',
-        'CommaSeparatedIntegerField': 'text',
-        'DateField':         'date',
-        'DateTimeField':     'datetime',
-        'DecimalField':      'decimal',
-        'EmailField':        'text',
-        'FileField':         'text',
-        'FilePathField':     'text',
-        'FloatField':        'float',
-        'ImageField':        'text',
-        'IntegerField':      'integer',
-        'IPAddressField':    'text',
-        'NullBooleanField':  'bool',
-        'PositiveIntegerField': 'integer',
-        'PositiveSmallIntegerField': 'integer',
-        'SlugField':         'text',
-        'SmallIntegerField': 'integer',
-        'TextField':         'longtext',
-        'TimeField':         'time',
-        'URLField':          'text',
-        'XMLField':          'longtext',
+        # process Python objects.
+        'BigIntegerField':            'long',
+        'BooleanField':               'bool',
+        'CharField':                  'string',
+        'CommaSeparatedIntegerField': 'string',
+        'DateField':                  'date',
+        'DateTimeField':              'datetime',
+        'DecimalField':               'decimal',
+        'EmailField':                 'string',
+        'FileField':                  'string',
+        'FilePathField':              'string',
+        'FloatField':                 'float',
+        'ImageField':                 'string',
+        'IntegerField':               'integer',
+        'IPAddressField':             'string',
+        'NullBooleanField':           'bool',
+        'PositiveIntegerField':       'integer',
+        'PositiveSmallIntegerField':  'integer',
+        'SlugField':                  'string',
+        'SmallIntegerField':          'integer',
+        'TextField':                  'string',
+        'TimeField':                  'time',
+        'URLField':                   'string',
+        'XMLField':                   'string',
 
         # Mappings for fields provided by nonrel. You may use "list"
         # for SetFields if your database cannot store sets directly,
         # but note that the same set may be represented by different
         # lists (with elements in different order), so lookups may
         # have some quirks if you do so.
-        'RawField':          'raw',
-        'BlobField':         'blob',
-        'AbstractIterableField': 'list',
-        'ListField':         'list',
-        'SetField':          'set',
-        'DictField':         'dict',
-        'EmbeddedModelField': 'dict',
+        'RawField':                   'raw',
+        'BlobField':                  'bytes',
+        'AbstractIterableField':      'list',
+        'ListField':                  'list',
+        'SetField':                   'set',
+        'DictField':                  'dict',
+        'EmbeddedModelField':         'dict',
     }
 
     def db_info(self, field):
@@ -69,8 +67,8 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         containing all info needed to encode field's value for a nonrel
         database. Used by convert_value_to/from_db.
 
-        The first argument is just the field's internal type, it is
-        needed to do what missing value_to_db_* methods could do.
+        The first argument is just the field's internal type (kind); it
+        is needed to do what missing value_to_db_* methods could do.
 
         We put db_table alongside field db_type -- to allow back-ends
         having separate key spaces for different tables to create keys
@@ -88,7 +86,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
                 post = EmbeddedModelField(Post)
                 posts = ListField(models.ForeignKey(Post))
 
-            clas Post(models.Model)
+            class Post(models.Model)
                 pass
 
         a db_info for the "post" field could be:
