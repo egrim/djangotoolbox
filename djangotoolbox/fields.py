@@ -119,8 +119,10 @@ class AbstractIterableField(models.Field):
                              value, connection=connection)
 
     def get_db_prep_lookup(self, lookup_type, value, connection, prepared=False):
+
         # TODO/XXX: Remove as_lookup_value() once we have a cleaner solution
-        # for dot-notation queries
+        # for dot-notation queries (related to A() / Q() queries, but doesn't
+        # seem anything actually uses this; see: https://groups.google.com/group/django-non-relational/browse_thread/thread/6056f8384c9caf04/89eeb9fb22ad16f3).
         if hasattr(value, 'as_lookup_value'):
             value = value.as_lookup_value(self, lookup_type, connection)
 
@@ -256,17 +258,27 @@ class EmbeddedModelField(models.Field):
 
     def value_field(self, column):
         """
-        Returns a field for the given database column, as the dict
-        passed to the database layer uses columns rather than attribute
-        names.
+        Returns a field for the given database column.
+
+        This is called from database conversion routines, so has to use
+        column rather than attribute names, as the dict passed down
+        uses database columns as keys.
         """
+
+        # Generic embedding case, return one RawField instance for all
+        # values, so db_info is computed just once and for consistency
+        # with untyped list / dict fields.
         if self.embedded_model is None:
-            return RawField() # TODO: Create just one instance.
+            if not hasattr(self, '_embedded_raw_field'):
+                self._embedded_raw_field = RawField()
+            return self._embedded_raw_field
+
+        # Django does not have a ready method to map database column
+        # names to fields; compute the mapping once.
         else:
             if not hasattr(self, '_embedded_column_to_field'):
-                self._embedded_column_to_field = {}
-                for field in self.embedded_model._meta.fields:
-                    self._embedded_column_to_field[field.column] = field
+                self._embedded_column_to_field = dict((field.column, field)
+                    for field in self.embedded_model._meta.fields)
             return self._embedded_column_to_field[column]
 
     def _set_model(self, model):
@@ -322,7 +334,7 @@ class EmbeddedModelField(models.Field):
         embedded_instance._entity_exists = True
         return values
 
-    # TODO/XXX: Remove this once we have a cleaner solution
+    # TODO/XXX: Remove this once we have a cleaner solution.
     def get_db_prep_lookup(self, lookup_type, value, connection, prepared=False):
         if hasattr(value, 'as_lookup_value'):
             value = value.as_lookup_value(self, lookup_type, connection)

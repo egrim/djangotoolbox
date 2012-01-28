@@ -6,7 +6,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
     # "Types" used by back-end conversion routines to decide how to
     # convert data for or from the database. Type is understood here
     # a bit differently than in vanilla Django -- it should be read
-    # as a identifier of an encoding / decoding procedure to use, 
+    # as a identifier of an encoding / decoding procedure to use,
     # rather than just a database column type.
     data_types = {
 
@@ -97,34 +97,39 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
 
             ('ListField', 'list', 'blog',
                  func(0 => ('ForeignKey', 'key', 'post', None)))
-
-        TODO: Optimization: may be worth to memoize the tuple.
         """
 
-        # Field type is usually just the base field class name, while
-        # db_type is usually expected value's type or "key".
-        field_type = field.get_internal_type()
-        db_type = self.db_type(field)
+        # Memoize the result on the field to improve performance for
+        # typed collections (that use just one field for all items).
+        if not hasattr(field, '_db_info'):
 
-        # For ForeignKey, OneToOneField and ManyToManyField use the
-        # table of the model the field refers to.
-        if field.rel is not None:
-            db_table = field.rel.to._meta.db_table
-        else:
-            try:
-                db_table = field.model._meta.db_table
-            except AttributeError:
-                db_table = None
+            # Field type is usually just the base field class name,
+            # while db_type is usually expected value's type or "key".
+            field_type = field.get_internal_type()
+            db_type = self.db_type(field)
 
-        # Collection fields should provide value_field method that
-        # determines a field a value belongs to, turn it into a method
-        # computing db_info for this field.
-        if hasattr(field, 'value_field'):
-            db_subinfo = lambda *args: self.db_info(field.value_field(*args))
-        else:
-            db_subinfo = lambda *args: None
+            # For ForeignKey, OneToOneField and ManyToManyField use the
+            # table of the model the field refers to.
+            if field.rel is not None:
+                db_table = field.rel.to._meta.db_table
+            else:
+                try:
+                    db_table = field.model._meta.db_table
+                except AttributeError:
+                    db_table = None
 
-        return field_type, db_type, db_table, db_subinfo
+            # Collection fields should provide a value_field method that
+            # determines the field a value belongs to, turn it into a
+            # method computing db_info for this field.
+            if hasattr(field, 'value_field'):
+                db_subinfo = lambda *args: self.db_info(
+                    field.value_field(*args))
+            else:
+                db_subinfo = lambda *args: None
+
+            field._db_info = (field_type, db_type, db_table, db_subinfo)
+
+        return field._db_info
 
     def db_type(self, field):
         """
