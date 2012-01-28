@@ -50,7 +50,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'XMLField':          'longtext',
 
         # Mappings for fields provided by nonrel. You may use "list"
-        # for SetFields, but not DictFields. TODO: Doesn't seem hard to handle.
+        # for SetFields, to store them as lists.
         'RawField':          'raw',
         'BlobField':         'blob',
         'AbstractIterableField': 'list',
@@ -73,25 +73,32 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         having separate key spaces for different tables to create keys
         refering to the right table.
 
-        For collection fields (ListField etc.) we also need db_info
-        of elements -- that's the third element of the tuple. Currently
-        for untyped collections (with values not tied to fields) we do
-        almost no encoding / decoding of elements.
+        For list-like fields we also need db_infos of elements and for
+        dict-like fields db_infos of values -- the third element of the
+        tuple is a callable that can compute the db_info for index or
+        key of a value. For untyped collections (with values not tied to
+        fields) we do almost no encoding / decoding of elements.
 
         Consider the following example:
 
             class Blog(models.Model):
+                post = EmbeddedModelField(Post)
                 posts = ListField(models.ForeignKey(Post))
 
             clas Post(models.Model)
                 pass
 
-        a db_info for the 'posts' field could be:
+        a db_info for the "post" field could be:
 
-            ('ListField', 'list', 'blog', ('key', 'post', None))
+            ('EmbeddedModelField', 'dict', 'blog',
+                 func('post_id' => ('AutoField', 'key', 'post', None)))
 
-        TODO: Optimzation: memoize the tuple, or extend convert_value_*
-              to accept lists of values if the same type.
+        and for the "posts" field it could be:
+
+            ('ListField', 'list', 'blog',
+                 func(0 => ('ForeignKey', 'key', 'post', None)))
+
+        TODO: Optimization: may be worth to memoize the tuple.
         """
 
         # Field type is usually just the base field class name, while
@@ -104,13 +111,18 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         if field.rel is not None:
             db_table = field.rel.to._meta.db_table
         else:
-            db_table = field.model._meta.db_table
+            try:
+                db_table = field.model._meta.db_table
+            except AttributeError:
+                db_table = None
 
-        # Compute db_subinfo from item_field of iterable fields.
-        try:
-            db_subinfo = self.db_info(field.item_field)
-        except AttributeError:
-            db_subinfo = None
+        # Collection fields should provide value_field method that
+        # determines a field a value belongs to, turn it into a method
+        # computing db_info for this field.
+        if hasattr(field, 'value_field'):
+            db_subinfo = lambda *args: self.db_info(field.value_field(*args))
+        else:
+            db_subinfo = lambda *args: None
 
         return field_type, db_type, db_table, db_subinfo
 

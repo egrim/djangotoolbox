@@ -75,6 +75,18 @@ class AbstractIterableField(models.Field):
         if issubclass(metaclass, models.SubfieldBase):
             setattr(cls, self.name, _HandleAssignment(self))
 
+    def value_field(self, *args):
+        """
+        Returns a field that a value supposedly comes from or RawField
+        instance when the actual field is not known.
+
+        We need to know the field to properly prepare the value for the
+        database. Arguments to this function can only contain things
+        known to the database layer (like an index of a value on a list
+        or its key in a dictionary returned from get_db_prep_value).
+        """
+        return self.item_field
+
     def _convert(self, func, values, *args, **kwargs):
         if isinstance(values, (list, tuple, set)):
             return self._type(func(value, *args, **kwargs) for value in values)
@@ -165,7 +177,6 @@ class SetField(AbstractIterableField):
         return 'SetField'
 
 
-
 class DictField(AbstractIterableField):
     """
     Field representing a Python ``dict``.
@@ -242,6 +253,21 @@ class EmbeddedModelField(models.Field):
 
     def get_internal_type(self):
         return 'EmbeddedModelField'
+
+    def value_field(self, column):
+        """
+        Returns a field for the given database column, as the dict
+        passed to the database layer uses columns rather than attribute
+        names.
+        """
+        if self.embedded_model is None:
+            return RawField() # TODO: Create just one instance.
+        else:
+            if not hasattr(self, '_embedded_column_to_field'):
+                self._embedded_column_to_field = {}
+                for field in self.embedded_model._meta.fields:
+                    self._embedded_column_to_field[field.column] = field
+            return self._embedded_column_to_field[column]
 
     def _set_model(self, model):
         # We need to know the model to generate a valid key for the lookup but

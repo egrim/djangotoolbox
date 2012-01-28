@@ -29,10 +29,12 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
     # If set to True, all primary keys, foreign keys and other
     # references will get "key" db_type, otherwise the db_type will be
     # determined # using the original Django's logic.
+    # TODO: Consider removing after old storage for GAE is removed.
     has_key_type = True
 
     # Can primary_key be used on any field? Without encoding usually
     # only a very limited set of types is acceptable for keys.
+    # TODO: Could also be supports_primary_key_on = list(field kinds).
     # TODO: Move to core and use to skip unsuitable Django tests.
     supports_primary_key = False
 
@@ -69,9 +71,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     can convert any value of a "type".
 
     Please note, that after changes to type conversions, data saved
-    using preexisting methods needs to be handled.
-
-    TODO: Consider also adding value_to/from_db_key(value, field_type).
+    using preexisting methods needs to be handled; and that Django
+    does not expect any special database driver exceptions, so any such
+    exceptions should be reraised as django.utils.DatabaseException.
     """
     def __init__(self, connection):
         self.connection = connection
@@ -207,6 +209,11 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         :param db_info: A 4-tuple with (field_type, db_type, db_table,
                         db_subinfo)
         """
+
+        # Back-ends may want to store empty lists or dicts as None.
+        if value is None:
+            return None
+
         field_type, db_type, db_table, db_subinfo = db_info or \
            (None, None, None, None)
 
@@ -230,29 +237,27 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
         # Convert all values in a list or set using its subtype.
         # We store both as lists on default.
+        # TODO: Assume sets are directly storable on this level.
         if db_type == 'list' or db_type == 'set':
 
             # Note that value for a ListField and alike may be a list
             # element, that should be converted as a single value using
-            # the db_subinfo.
+            # db_subinfo (assuming it's the same for elements).
             # TODO: What about looking up a list in a list of lists? We
             #       should rather check if it's a lookup or not here.
             if isinstance(value, (list, tuple, set)):
-                value = [self.convert_value_for_db(subvalue, db_subinfo)
-                         for subvalue in value]
+                value = [self.convert_value_for_db(subvalue, db_subinfo(index))
+                         for index, subvalue in enumerate(value)]
             else:
-                value = self.convert_value_for_db(value, db_subinfo)
+                value = self.convert_value_for_db(value, db_subinfo())
 
-        # Convert dict values using the db_subtype; also convert
-        # non-Mapping types using the db_subinfo (for lookups).
-        # TODO: Only values, not keys?
+        # Convert dict values using respective db_subinfo or None, when
+        # the value does not have its db_subinfo.
+        # TODO: This assumes that dict keys do not require conversion.
         elif db_type == 'dict':
-            if isinstance(value, dict):
-                value = dict(
-                    (key, self.convert_value_for_db(subvalue, db_subinfo))
-                    for key, subvalue in value.iteritems())
-            else:
-                value = self.convert_value_for_db(value, db_subinfo)
+            value = dict(
+                (key, self.convert_value_for_db(subvalue, db_subinfo(key)))
+                for key, subvalue in value.iteritems())
 
         return value
 
@@ -268,6 +273,11 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         :param db_info: A 4-tuple with (field_type, db_type, db_table,
                         db_subinfo)
         """
+
+        # We did not convert Nones.
+        if value is None:
+            return None
+
         field_type, db_type, db_table, db_subinfo = db_info or \
            (None, None, None, None)
 
@@ -275,15 +285,15 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         # Note: Lookup values never get deconverted, so we can skip the
         # the "single value" check here.
         if db_type == 'list' or db_type == 'set':
-            value = [self.convert_value_from_db(subvalue, db_subinfo)
-                     for subvalue in value]
+            value = [self.convert_value_from_db(subvalue, db_subinfo(index))
+                     for index, subvalue in enumerate(value)]
             if db_type == 'set':
                 value = set(value)
 
         # We may have encoded dict values, so now decode them.
         elif db_type == 'dict':
             value = dict(
-                (key, self.convert_value_from_db(subvalue, db_subinfo))
+                (key, self.convert_value_from_db(subvalue, db_subinfo(key)))
                 for key, subvalue in value.iteritems())
 
         return value
