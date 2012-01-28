@@ -494,4 +494,4 @@ class LazyObjectsTest(TestCase):
         self.assertEqual(String.objects.get(s=mark_safe('c')), c)
         self.assertEqual(list(String.objects.filter(s__startswith=mark_safe('c'))), [c])
         self.assertEqual(String.objects.get(s=mark_for_escaping('c')), c)
-        self.assertEqual(list(String.objects.filter(s__startswith=mark_for_escaping('c'))), [c])    
+        self.assertEqual(list(String.objects.filter(s__startswith=mark_for_escaping('c'))), [c])

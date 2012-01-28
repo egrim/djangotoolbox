@@ -106,7 +106,7 @@ class NonrelQuery(object):
                                 "backend can convert them like this: "
                                 '"not (a OR b) => (not a) AND (not b)".')
 
-        # Recuresively call the method for internal tree nodes, add a
+        # Recursively call the method for internal tree nodes, add a
         # filter for each leaf.
         for child in children:
             if isinstance(child, Node):
@@ -435,7 +435,7 @@ class NonrelCompiler(SQLCompiler):
                 descending = not descending
             yield (opts.get_field(field).column, descending)
 
-    def convert_value_for_db(self, value, field):
+    def convert_value_for_db(self, value, field, lookup=False):
         """
         Does type-conversions defined by back-end's DatabaseOperations.
 
@@ -449,9 +449,11 @@ class NonrelCompiler(SQLCompiler):
 
         :param value: A value to be passed to the database driver
         :param field: The field the value comes from
+        :param lookup: Is the value being prepared as a filter
+                       parameter or for storage
         """
         return self.connection.ops.convert_value_for_db(
-            value, self.connection.creation.db_info(field))
+            value, self.connection.creation.db_info(field), lookup)
 
     def convert_value_from_db(self, value, field):
         """

@@ -71,9 +71,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     can convert any value of a "type".
 
     Please note, that after changes to type conversions, data saved
-    using preexisting methods needs to be handled; and that Django
+    using preexisting methods needs to be handled; and also that Django
     does not expect any special database driver exceptions, so any such
-    exceptions should be reraised as django.utils.DatabaseException.
+    exceptions should be reraised as django.db.utils.DatabaseError.
     """
     def __init__(self, connection):
         self.connection = connection
@@ -195,7 +195,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         """
         return value
 
-    def convert_value_for_db(self, value, db_info):
+    def convert_value_for_db(self, value, db_info, lookup=False):
         """
         Converts a standard Python value to a type that can be stored
         or processed by the database.
@@ -211,6 +211,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         :param value: A value to be passed to the database driver
         :param db_info: A 4-tuple with (field_type, db_type, db_table,
                         db_subinfo)
+        :param lookup: Is the value being prepared as a filter
+                       parameter or for storage
         """
 
         # Back-ends may want to store empty lists or dicts as None.
@@ -241,31 +243,32 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         # Convert all elements of a list or set and values of a dict
         # using the proper subinfo,
         # Note that collection field lookup values are single values
-        # rather than collections, and that they should be converted
-        # using collection's db_subinfo (assuming it's the same for
-        # elements).
-        # TODO: What about looking up a list in a list of lists? We
-        #       should rather check if it's a lookup or not here.
+        # rather than collections, but that they still should be
+        # converted using collection's db_subinfo (assuming it's the
+        # same for all elements).
         if db_type == 'list':
-            if isinstance(value, (list, tuple, set, frozenset)):
-                value = [self.convert_value_for_db(element, db_subinfo(index))
-                         for index, element in enumerate(value)]
+            if lookup:
+                value = self.convert_value_for_db(value, db_subinfo(), lookup)
             else:
-                value = self.convert_value_for_db(value, db_subinfo())
+                value = list(
+                    self.convert_value_for_db(element, db_subinfo(index), lookup)
+                    for index, element in enumerate(value))
         elif db_type == 'set':
-            if isinstance(value, (list, tuple, set, frozenset)):
-                value = set(self.convert_value_for_db(element, db_subinfo())
-                         for element in value)
+            if lookup:
+                value = self.convert_value_for_db(value, db_subinfo(), lookup)
             else:
-                value = self.convert_value_for_db(value, db_subinfo())
+                value = set(
+                    self.convert_value_for_db(element, db_subinfo(), lookup)
+                    for element in value)
         elif db_type == 'dict':
-            if isinstance(value, dict):
-		        value = dict(
-		            (key, self.convert_value_for_db(subvalue, db_subinfo(key)))
-		            for key, subvalue in value.iteritems())
-            else:
+            if lookup:
                 # TODO: How do we really know which subinfo to use for lookup value?
-                value = self.convert_value_for_db(value, db_subinfo())
+                #       We could do a bit more for EmbeddedModelFields.
+                value = self.convert_value_for_db(value, db_subinfo(), lookup)
+            else:
+		        value = dict(
+		            (key, self.convert_value_for_db(subvalue, db_subinfo(key), lookup))
+		            for key, subvalue in value.iteritems())
 
         return value
 
@@ -274,7 +277,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         Converts a database type to a standard Python type.
 
         If you encoded a value for storage in the database, reverse the
-        encoding here. This implementation only recuresively deconverts
+        encoding here. This implementation only recursively deconverts
         elements of iterables (for "list", "set" or "dict" db_type).
 
         You may want to call this method after any back-end specific
@@ -294,13 +297,15 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
         # Deconvert elements of a list or set and dict values.
         # Note: Lookup values never get deconverted, so we can skip the
-        # the "single value" check here.
+        # the check here.
         if db_type == 'list':
-            value = [self.convert_value_from_db(element, db_subinfo(index))
-                     for index, element in enumerate(value)]
+            value = list(
+                self.convert_value_from_db(element, db_subinfo(index))
+                for index, element in enumerate(value))
         elif db_type == 'set':
-            value = set(self.convert_value_from_db(element, db_subinfo())
-                        for element in value)
+            value = set(
+                self.convert_value_from_db(element, db_subinfo())
+                for element in value)
         elif db_type == 'dict':
             value = dict(
                 (key, self.convert_value_from_db(subvalue, db_subinfo(key)))
@@ -338,6 +343,7 @@ class FakeCursor(object):
 
 
 class NonrelDatabaseWrapper(BaseDatabaseWrapper):
+
     # These fake operators are required for SQLQuery.as_sql() support.
     operators = {
         'exact': '= %s',
