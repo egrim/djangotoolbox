@@ -200,10 +200,13 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         Converts a standard Python value to a type that can be stored
         or processed by the database.
 
-        This implementatin only converts values with "list", "set" or
-        "dict", evaluates lazy objects and Django's Escape/SafeData.
-        You may want to call it before doing other back-end specific
-        conversions.
+        This implementation only converts elements of collections for
+        "list", "set" and "dict" db_types, evaluates lazy objects and
+        Django's Escape/SafeData. Currently it assumes that dict keys
+        do not require conversion.
+
+        You may want to call this method before doing other back-end
+        specific conversions.
 
         :param value: A value to be passed to the database driver
         :param db_info: A 4-tuple with (field_type, db_type, db_table,
@@ -235,29 +238,34 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         if isinstance(value, (SafeUnicode, EscapeUnicode)):
              value = unicode(value)
 
-        # Convert all values in a list or set using its subtype.
-        # We store both as lists on default.
-        # TODO: Assume sets are directly storable on this level.
-        if db_type == 'list' or db_type == 'set':
-
-            # Note that value for a ListField and alike may be a list
-            # element, that should be converted as a single value using
-            # db_subinfo (assuming it's the same for elements).
-            # TODO: What about looking up a list in a list of lists? We
-            #       should rather check if it's a lookup or not here.
-            if isinstance(value, (list, tuple, set)):
-                value = [self.convert_value_for_db(subvalue, db_subinfo(index))
-                         for index, subvalue in enumerate(value)]
+        # Convert all elements of a list or set and values of a dict
+        # using the proper subinfo,
+        # Note that collection field lookup values are single values
+        # rather than collections, and that they should be converted
+        # using collection's db_subinfo (assuming it's the same for
+        # elements).
+        # TODO: What about looking up a list in a list of lists? We
+        #       should rather check if it's a lookup or not here.
+        if db_type == 'list':
+            if isinstance(value, (list, tuple, set, frozenset)):
+                value = [self.convert_value_for_db(element, db_subinfo(index))
+                         for index, element in enumerate(value)]
             else:
                 value = self.convert_value_for_db(value, db_subinfo())
-
-        # Convert dict values using respective db_subinfo or None, when
-        # the value does not have its db_subinfo.
-        # TODO: This assumes that dict keys do not require conversion.
+        elif db_type == 'set':
+            if isinstance(value, (list, tuple, set, frozenset)):
+                value = set(self.convert_value_for_db(element, db_subinfo())
+                         for element in value)
+            else:
+                value = self.convert_value_for_db(value, db_subinfo())
         elif db_type == 'dict':
-            value = dict(
-                (key, self.convert_value_for_db(subvalue, db_subinfo(key)))
-                for key, subvalue in value.iteritems())
+            if isinstance(value, dict):
+		        value = dict(
+		            (key, self.convert_value_for_db(subvalue, db_subinfo(key)))
+		            for key, subvalue in value.iteritems())
+            else:
+                # TODO: How do we really know which subinfo to use for lookup value?
+                value = self.convert_value_for_db(value, db_subinfo())
 
         return value
 
@@ -268,6 +276,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         If you encoded a value for storage in the database, reverse the
         encoding here. This implementation only recuresively deconverts
         elements of iterables (for "list", "set" or "dict" db_type).
+
+        You may want to call this method after any back-end specific
+        deconversions.
 
         :param value: A value received from the database
         :param db_info: A 4-tuple with (field_type, db_type, db_table,
@@ -281,16 +292,15 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         field_type, db_type, db_table, db_subinfo = db_info or \
            (None, None, None, None)
 
-        # Deconvert each value in a list, return a set for the set type.
+        # Deconvert elements of a list or set and dict values.
         # Note: Lookup values never get deconverted, so we can skip the
         # the "single value" check here.
-        if db_type == 'list' or db_type == 'set':
-            value = [self.convert_value_from_db(subvalue, db_subinfo(index))
-                     for index, subvalue in enumerate(value)]
-            if db_type == 'set':
-                value = set(value)
-
-        # We may have encoded dict values, so now decode them.
+        if db_type == 'list':
+            value = [self.convert_value_from_db(element, db_subinfo(index))
+                     for index, element in enumerate(value)]
+        elif db_type == 'set':
+            value = set(self.convert_value_from_db(element, db_subinfo())
+                        for element in value)
         elif db_type == 'dict':
             value = dict(
                 (key, self.convert_value_from_db(subvalue, db_subinfo(key)))

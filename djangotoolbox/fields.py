@@ -71,6 +71,7 @@ class AbstractIterableField(models.Field):
         self.item_field.name = name
         super(AbstractIterableField, self).contribute_to_class(cls, name)
 
+        # If items field uses SubfieldBase, we also need to.
         metaclass = getattr(self.item_field, '__metaclass__', None)
         if issubclass(metaclass, models.SubfieldBase):
             setattr(cls, self.name, _HandleAssignment(self))
@@ -88,7 +89,7 @@ class AbstractIterableField(models.Field):
         return self.item_field
 
     def _convert(self, func, values, *args, **kwargs):
-        if isinstance(values, (list, tuple, set)):
+        if isinstance(values, (list, tuple, set, frozenset)):
             return self._type(func(value, *args, **kwargs) for value in values)
         return values
 
@@ -122,7 +123,8 @@ class AbstractIterableField(models.Field):
 
         # TODO/XXX: Remove as_lookup_value() once we have a cleaner solution
         # for dot-notation queries (related to A() / Q() queries, but doesn't
-        # seem anything actually uses this; see: https://groups.google.com/group/django-non-relational/browse_thread/thread/6056f8384c9caf04/89eeb9fb22ad16f3).
+        # seem anything actually uses this; see:
+        # https://groups.google.com/group/django-non-relational/browse_thread/thread/6056f8384c9caf04/89eeb9fb22ad16f3).
         if hasattr(value, 'as_lookup_value'):
             value = value.as_lookup_value(self, lookup_type, connection)
 
