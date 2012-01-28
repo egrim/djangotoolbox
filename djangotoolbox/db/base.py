@@ -306,6 +306,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                 (key, self.convert_value_from_db(subvalue, db_subinfo(key)))
                 for key, subvalue in value.iteritems())
 
+        # Support using "list" for SetField storage.
+        if field_type == 'SetField' and db_type == 'list':
+            value = set(value)
+
         return value
 
 

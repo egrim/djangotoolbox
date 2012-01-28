@@ -6,7 +6,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
     # "Types" used by back-end conversion routines to decide how to
     # convert data for or from the database. Type is understood here
     # a bit differently than in vanilla Django -- it should be read
-    # as a identifier of an encoding / decoding procedure to use,
+    # as an identifier of an encoding / decoding procedure to use,
     # rather than just a database column type.
     data_types = {
 
@@ -20,7 +20,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'OneToOneField':     'key',
         'ManyToManyField':   'key',
 
-        # Standard fields types, more or less suitable for databases
+        # Standard field types, more or less suitable for databases
         # (or its client / driver) being able to directly store or
         # process Python objects, but having separate types for storing
         # short and long strings.
@@ -50,7 +50,10 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'XMLField':          'longtext',
 
         # Mappings for fields provided by nonrel. You may use "list"
-        # for SetFields, to store them as lists.
+        # for SetFields if your database cannot store sets directly,
+        # but note that the same set may be represented by different
+        # lists (with elements in different order), so lookups may
+        # have some quirks if you do so.
         'RawField':          'raw',
         'BlobField':         'blob',
         'AbstractIterableField': 'list',
