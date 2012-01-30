@@ -61,64 +61,6 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'EmbeddedModelField':         'dict',
     }
 
-    def db_info(self, field):
-        """
-        Returns a tuple of (field, db_type, db_table, db_subinfo)
-        containing all info needed to encode field's value for a nonrel
-        database. Used by convert_value_to/from_db.
-
-        The first argument is a field with the same properties that the
-        field the value comes from, note that it doesn't need to hold
-        any value; it is needed to do what missing value_to_db_* methods
-        could do and for untyped embedded fields deconversion.
-
-        For list-like fields we also need db_infos of elements and for
-        dict-like fields db_infos of values -- the third element of the
-        tuple is a callable that can compute the db_info for index or
-        key of a value. For untyped collections (with values not tied to
-        fields) we do almost no encoding / decoding of elements.
-
-        Consider the following example:
-
-            class Blog(models.Model):
-                post = EmbeddedModelField(Post)
-                posts = ListField(models.ForeignKey(Post))
-
-            class Post(models.Model)
-                pass
-
-        a db_info for the "post" field could be:
-
-            (EmbeddedModelField, 'dict',
-                 func(Post's AutoField => (AutoField, 'key', None)))
-
-        and for the "posts" field it could be:
-
-            (ListField, 'list', 'blog',
-                 func(0 => (ForeignKey, 'key', None)))
-        """
-
-        # Memoize the result on the field to improve performance for
-        # typed collections (that use just one field for all items).
-        if not hasattr(field, '_db_info'):
-
-            # General conversions need db_type and it is the only thing
-            # back-ends should care about.
-            db_type = self.db_type(field)
-
-            # Collection fields should provide a value_field method that
-            # determines the field a value belongs to, turn it into a
-            # method computing db_info for that field.
-            if hasattr(field, 'value_field'):
-                db_subinfo = lambda *args: self.db_info(
-                    field.value_field(*args))
-            else:
-                db_subinfo = lambda *args: None
-
-            field._db_info = (field, db_type, db_subinfo)
-
-        return field._db_info
-
     def db_type(self, field):
         """
         If the databases has a special type used for all keys, returns
@@ -135,7 +77,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         TODO: Doesn't seem necessary any longer. Also remove all
               references to "RelatedAutoField".
         """
-        raise Error('Not used?')
+#        raise Error('Not used?')
         if self.connection.features.has_single_key_type:
              return 'key'
         return super(NonrelDatabaseCreation, self).db_type(field)

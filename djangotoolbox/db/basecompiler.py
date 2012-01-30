@@ -33,6 +33,9 @@ class NonrelQuery(object):
     Provides in-memory filtering and ordering and a framework for
     converting SQL constraint tree built by Django to a representation
     more suitable for most NoSQL databases.
+
+    TODO: Replace with FetchCompiler, there are to many query concepts
+          around, and it isn't a good abstraction for NoSQL databases.
     """
 
     # ----------------------------------------------
@@ -70,7 +73,7 @@ class NonrelQuery(object):
         :param negated: Is the lookup negated
         :param value: Lookup argument, e.g. value to compare with
         :param field: Field the value comes from; only use it to learn
-                      properties of value.
+                      properties of value
 
         TODO: Rename, this methods deals with constraints rather than
               what Django calls lookups.
@@ -358,7 +361,7 @@ class NonrelCompiler(SQLCompiler):
         """
         Counts objects matching the current filters / constraints.
 
-        :param check_exists: Only check if any object matches.
+        :param check_exists: Only check if any object matches
         """
         if check_exists:
             high_mark = 1
@@ -442,41 +445,30 @@ class NonrelCompiler(SQLCompiler):
 
         This is a convience wrapper, that only precomputes field_kind
         and db_type and calls DatabaseOperations method to do the real
-        work; you should typically override the DatabaseOperations
+        work; you should typically extend the DatabaseOperations
         method, but only call this one.
-
-        We need field here for two reasons:
-        -- to allow back-ends having separate key spaces for different
-           tables to create keys refering to the right table (which can
-           be the field model's table or the table of the model of the
-           instance a ForeignKey or other relation field points to).
-        -- to know the field of values passed by typed collection
-           fields and to use the proper fields when deconverting values
-           stored for typed embedding field.
-        Avoid using the field in any other way than by inspecting its
-        properties, it may not hold any value or hold a value other
-        than the one you're asked to convert.
 
         Note that compilers may do conversions without building a
         NonrelQuery, thus we need to define this method here rather
         than on the query class.
 
         :param value: A value to be passed to the database driver
-        :param field: The field the value comes from
+        :param field: A field the value comes from
         :param lookup: Is the value being prepared as a filter
                        parameter or for storage
         """
-        return self.connection.ops.convert_value_for_db(
-            value, self.connection.creation.db_info(field), lookup)
+        return self.connection.ops.convert_value_for_db(value,
+            field, field.get_internal_type(), field.db_type(), lookup)
 
     def convert_value_from_db(self, value, field):
         """
         Performs deconversions defined by back-end's DatabaseOperations.
 
-        See convert_value_for_db.
+        :param value: A value received from the database client
+        :param field: A field the value is meant for
         """
-        return self.connection.ops.convert_value_from_db(
-            value, self.connection.creation.db_info(field))
+        return self.connection.ops.convert_value_from_db(value,
+            field, field.get_internal_type(), field.db_type())
 
 
 class NonrelInsertCompiler(NonrelCompiler):

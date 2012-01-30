@@ -44,13 +44,13 @@ class RawField(models.Field):
 
 class AbstractIterableField(models.Field):
     """
-    Abstract field for fields for storing iterable data type like ``list``,
-    ``set`` and ``dict``.
+    Abstract field for fields for storing iterable data type like
+    ``list``, ``set`` and ``dict``.
 
     You can pass an instance of a field as the first argument.
-    If you do, the iterable items will be piped through the passed field's
-    validation and conversion routines, converting the items to the
-    appropriate data type.
+    If you do, the iterable items will be piped through the passed
+    field's validation and conversion routines, converting the items
+    to the appropriate data type.
     """
     def __init__(self, item_field=None, *args, **kwargs):
         default = kwargs.get('default', None if kwargs.get('null') else EMPTY_ITER)
@@ -75,18 +75,6 @@ class AbstractIterableField(models.Field):
         metaclass = getattr(self.item_field, '__metaclass__', None)
         if issubclass(metaclass, models.SubfieldBase):
             setattr(cls, self.name, _HandleAssignment(self))
-
-    def value_field(self, *args):
-        """
-        Returns a field that a value supposedly comes from or RawField
-        instance when the actual field is not known.
-
-        We need to know the field to properly prepare the value for the
-        database. Arguments to this function can only contain things
-        known to the database layer (like an index of a value on a list
-        or its key in a dictionary returned from get_db_prep_value).
-        """
-        return self.item_field
 
     def _convert(self, func, values, *args, **kwargs):
         if isinstance(values, (list, tuple, set, frozenset)):
@@ -258,16 +246,6 @@ class EmbeddedModelField(models.Field):
 
     def get_internal_type(self):
         return 'EmbeddedModelField'
-
-    def value_field(self, field):
-        """
-        Returns a field for some value from an embedded instance.
-
-        We've used fields as dictionary keys, otherwise we'd not be
-        able to determine the field of a value from a model in an
-        untyped collection.
-        """
-        return field
 
     def _set_model(self, model):
         # We need to know the model to generate a valid key for the lookup but
