@@ -9,14 +9,16 @@ from django.utils.importlib import import_module
 from django.utils.safestring import EscapeString, EscapeUnicode, SafeString, \
     SafeUnicode
 
+from .creation import NonrelDatabaseCreation
+
 
 class NonrelDatabaseFeatures(BaseDatabaseFeatures):
 
     # NoSQL databases usually return a key after saving a new object.
     can_return_id_from_insert = True
 
-    # TODO: Why? Doesn't seem true in general (probably changes Django
-    # behaviour, but needs to be verified).
+    # TODO: Doesn't seem necessary in general, move to back-ends.
+    #       Mongo: see PyMongo's FAQ; GAE: see: http://timezones.appspot.com/.
     supports_date_lookup_using_string = False
     supports_timezones = False
 
@@ -26,20 +28,24 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
     supports_select_related = False
     supports_deleting_related_objects = False
 
-    # Does the database use special type for all keys and references?
-    # If set to True, all primary keys, foreign keys and other
-    # references will get "key" db_type, otherwise the db_type will be
-    # determined # using the original Django's logic.
-    # TODO: Consider removing after old storage for GAE is removed.
-    has_key_type = True
+    # Does the database use one type for all keys and references or
+    # can any type be used? If set to True, all primary keys, foreign
+    # keys and other references will have a "key" db_type, otherwise
+    # the db_type set for field kind will be used for type conversions.
+    has_single_key_type = True
 
     # Can primary_key be used on any field? Without encoding usually
-    # only a very limited set of types is acceptable for keys.
-    # TODO: Could also be supports_primary_key_on = list(field kinds).
+    # only a limited set of types is acceptable for keys. This is a set
+    # of all field kinds (internal_types) for which the primary_key
+    # argument may be used.
+    # TODO: Use during model validation.
     # TODO: Move to core and use to skip unsuitable Django tests.
-    supports_primary_key = False
+    supports_primary_key_on = set(NonrelDatabaseCreation.data_types.keys()) - \
+        set(('ForeignKey', 'RelatedAutoField', 'OneToOneField', 'ManyToManyField',
+            'RawField', 'BlobField',))
 
     # Can a dictionary be saved / fetched from the database.
+    # TODO: Remove once "list" is supported for all collection fields.
     supports_dicts = False
 
     def _supports_transactions(self):

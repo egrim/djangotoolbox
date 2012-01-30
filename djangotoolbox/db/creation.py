@@ -140,19 +140,20 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         all primary key fields and related fields independent of the
         field class; otherwise uses original Django's logic.
         """
-        if self.connection.features.has_key_type and \
+        if self.connection.features.has_single_key_type and \
             (field.primary_key or field.rel is not None):
             return 'key'
         return super(NonrelDatabaseCreation, self).db_type(field)
 
     def related_db_type(self, field):
         """
-        TODO: Doesn't seem necessary any longer.
+        TODO: Doesn't seem necessary any longer. Also remove all
+              references to "RelatedAutoField".
         """
-        if self.connection.features.has_key_type:
+        raise Error('Not used?')
+        if self.connection.features.has_single_key_type:
              return 'key'
         return super(NonrelDatabaseCreation, self).db_type(field)
-#        return self.db_type(field)
 
     def sql_create_model(self, model, style, known_models=set()):
         """
