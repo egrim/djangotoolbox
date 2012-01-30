@@ -437,15 +437,29 @@ class NonrelCompiler(SQLCompiler):
 
     def convert_value_for_db(self, value, field, lookup=False):
         """
-        Does type-conversions defined by back-end's DatabaseOperations.
+        Does type-conversions needed before storing a value in the
+        the database or using it as a filter parameter.
 
-        This is a convience wrapper, that only asks NonrelDatabaseCreation
-        to compute db_info for the given field; you should typically
-        override the DatabaseOperations method, but only call this one.
+        This is a convience wrapper, that only precomputes field_kind
+        and db_type and calls DatabaseOperations method to do the real
+        work; you should typically override the DatabaseOperations
+        method, but only call this one.
+
+        We need field here for two reasons:
+        -- to allow back-ends having separate key spaces for different
+           tables to create keys refering to the right table (which can
+           be the field model's table or the table of the model of the
+           instance a ForeignKey or other relation field points to).
+        -- to know the field of values passed by typed collection
+           fields and to use the proper fields when deconverting values
+           stored for typed embedding field.
+        Avoid using the field in any other way than by inspecting its
+        properties, it may not hold any value or hold a value other
+        than the one you're asked to convert.
 
         Note that compilers may do conversions without building a
-        NonrelQuery, thus we need to define it here rather than on the
-        query class (as Django does with sql.Query.convert_values).
+        NonrelQuery, thus we need to define this method here rather
+        than on the query class.
 
         :param value: A value to be passed to the database driver
         :param field: The field the value comes from

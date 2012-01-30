@@ -72,10 +72,6 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         any value; it is needed to do what missing value_to_db_* methods
         could do and for untyped embedded fields deconversion.
 
-        We put db_table alongside field db_type -- to allow back-ends
-        having separate key spaces for different tables to create keys
-        refering to the right table.
-
         For list-like fields we also need db_infos of elements and for
         dict-like fields db_infos of values -- the third element of the
         tuple is a callable that can compute the db_info for index or
@@ -93,13 +89,13 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
 
         a db_info for the "post" field could be:
 
-            (EmbeddedModelField, 'dict', 'blog',
-                 func(Post's AutoField => (AutoField, 'key', 'post', None)))
+            (EmbeddedModelField, 'dict',
+                 func(Post's AutoField => (AutoField, 'key', None)))
 
         and for the "posts" field it could be:
 
             (ListField, 'list', 'blog',
-                 func(0 => (ForeignKey, 'key', 'post', None)))
+                 func(0 => (ForeignKey, 'key', None)))
         """
 
         # Memoize the result on the field to improve performance for
@@ -110,17 +106,6 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
             # back-ends should care about.
             db_type = self.db_type(field)
 
-            # For ForeignKey, OneToOneField and ManyToManyField use the
-            # table of the model the field refers to.
-            # TODO: Move to GAE?
-            if field.rel is not None:
-                db_table = field.rel.to._meta.db_table
-            else:
-                try:
-                    db_table = field.model._meta.db_table
-                except AttributeError:
-                    db_table = None
-
             # Collection fields should provide a value_field method that
             # determines the field a value belongs to, turn it into a
             # method computing db_info for that field.
@@ -130,15 +115,15 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
             else:
                 db_subinfo = lambda *args: None
 
-            field._db_info = (field, db_type, db_table, db_subinfo)
+            field._db_info = (field, db_type, db_subinfo)
 
         return field._db_info
 
     def db_type(self, field):
         """
-        If the databases has a special key type, returns "key" for
-        all primary key fields and related fields independent of the
-        field class; otherwise uses original Django's logic.
+        If the databases has a special type used for all keys, returns
+        "key" for all primary key fields and related fields independent
+        of the field class; otherwise uses the original Django's logic.
         """
         if self.connection.features.has_single_key_type and \
             (field.primary_key or field.rel is not None):

@@ -229,7 +229,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         if value is None:
             return None
 
-        field, db_type, db_table, db_subinfo = db_info or \
+        field, db_type, db_subinfo = db_info or \
            (None, None, None, None)
 
         # Force evaluation of lazy objects (e.g. lazy translation
@@ -328,7 +328,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         if value is None:
             return None
 
-        field, db_type, db_table, db_subinfo = db_info or \
+        field, db_type, db_subinfo = db_info or \
            (None, None, None, None)
 
         # Deconvert elements of a list or set assuming a field that
