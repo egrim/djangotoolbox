@@ -5,6 +5,7 @@ from django.db.backends import BaseDatabaseFeatures, BaseDatabaseOperations, \
     BaseDatabaseIntrospection
 from django.db.utils import DatabaseError
 from django.utils.functional import Promise
+from django.utils.importlib import import_module
 from django.utils.safestring import EscapeString, EscapeUnicode, SafeString, \
     SafeUnicode
 
@@ -202,15 +203,18 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
         This implementation only converts elements of collections for
         "list", "set" and "dict" db_types, evaluates lazy objects and
-        Django's Escape/SafeData. Currently it assumes that dict keys
-        do not require conversion.
+        Django's Escape/SafeData and handles embedded models.
+        Currently, we assume that dict keys do not require conversion
+        (including column, model and module names of embedded models).
 
         You may want to call this method before doing other back-end
         specific conversions.
 
         :param value: A value to be passed to the database driver
-        :param db_info: A 4-tuple with (field_type, db_type, db_table,
-                        db_subinfo)
+        :param db_info: A 4-tuple with (field, db_type, db_table,
+                        db_subinfo); only use the field for inspection,
+                        it may not hold any value or hold a different
+                        value than the one you're to convert
         :param lookup: Is the value being prepared as a filter
                        parameter or for storage
         """
@@ -219,7 +223,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         if value is None:
             return None
 
-        field_type, db_type, db_table, db_subinfo = db_info or \
+        field, db_type, db_table, db_subinfo = db_info or \
            (None, None, None, None)
 
         # Force evaluation of lazy objects (e.g. lazy translation
@@ -243,9 +247,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         # Convert all elements of a list or set and values of a dict
         # using the proper subinfo,
         # Note that collection field lookup values are single values
-        # rather than collections, but that they still should be
-        # converted using collection's db_subinfo (assuming it's the
-        # same for all elements).
+        # rather than collections, but they still should be converted
+        # using collection's db_subinfo (assuming it's the same for all
+        # elements).
         if db_type == 'list':
             if lookup:
                 value = self.convert_value_for_db(value, db_subinfo(), lookup)
@@ -266,9 +270,33 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                 #       We could do a bit more for EmbeddedModelFields.
                 value = self.convert_value_for_db(value, db_subinfo(), lookup)
             else:
-		        value = dict(
-		            (key, self.convert_value_for_db(subvalue, db_subinfo(key), lookup))
-		            for key, subvalue in value.iteritems())
+
+                # We will save a field.column => value dict, possibly
+                # augmented with model info (to be able to deconvert
+                # the embedded instance with untyped fields).
+                # This can be processed as any other dict in following
+                # back-end conversions.
+                if field.get_internal_type() == 'EmbeddedModelField':
+                    model, field_values = value
+
+                    # Convert using proper field's db_info, change keys
+                    # from fields to columns.
+                    value = dict(
+                        (subfield.column, self.convert_value_for_db(
+                            subvalue, db_subinfo(subfield), lookup))
+                        for subfield, subvalue in field_values.iteritems())
+
+                    # Store model info alongside values for untyped
+                    # embedding; if none is given the field uses a
+                    # fixed model.
+                    if model is not None:
+                        value['_module'] = model.__class__.__module__
+                        value['_model'] = model.__class__.__name__
+
+                else:
+                    value = dict((key, self.convert_value_for_db(
+                            subvalue, db_subinfo(key), lookup))
+                        for key, subvalue in value.iteritems())
 
         return value
 
@@ -280,11 +308,13 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         encoding here. This implementation only recursively deconverts
         elements of iterables (for "list", "set" or "dict" db_type).
 
+        Note: lookup values never get deconverted.
+
         You may want to call this method after any back-end specific
         deconversions.
 
         :param value: A value received from the database
-        :param db_info: A 4-tuple with (field_type, db_type, db_table,
+        :param db_info: A 4-tuple with (field, db_type, db_table,
                         db_subinfo)
         """
 
@@ -292,28 +322,61 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         if value is None:
             return None
 
-        field_type, db_type, db_table, db_subinfo = db_info or \
+        field, db_type, db_table, db_subinfo = db_info or \
            (None, None, None, None)
 
-        # Deconvert elements of a list or set and dict values.
-        # Note: Lookup values never get deconverted, so we can skip the
-        # the check here.
+        # Deconvert elements of a list or set assuming a field that
+        # uses such type has an "item_field" property.
         if db_type == 'list':
             value = list(
                 self.convert_value_from_db(element, db_subinfo(index))
                 for index, element in enumerate(value))
+
+            # Support using "list" for SetField storage.
+            if field.get_internal_type() == 'SetField':
+                value = set(value)
+
         elif db_type == 'set':
             value = set(
                 self.convert_value_from_db(element, db_subinfo())
                 for element in value)
-        elif db_type == 'dict':
-            value = dict(
-                (key, self.convert_value_from_db(subvalue, db_subinfo(key)))
-                for key, subvalue in value.iteritems())
 
-        # Support using "list" for SetField storage.
-        if field_type == 'SetField' and db_type == 'list':
-            value = set(value)
+        elif db_type == 'dict':
+
+            # Embedded instance may need to load its model class first,
+            # so we know fields to be used for value deconversions.
+            if field.get_internal_type() == 'EmbeddedModelField':
+
+                # We either use the model stored alongside the values
+                # (untyped embedding) or the one provided by the field
+                # (typed embedding).
+                module = value.pop('_module', None)
+                model = value.pop('_model', None)
+                if module is None:
+                    model = field.embedded_model
+                else:
+                    model = getattr(import_module(module), model)
+
+                # Deconvert field values and prepare a dict that can be
+                # used to initialize a model. Leave fields for which no
+                # value is stored uninitialized.
+                data = {}
+                for subfield in model._meta.fields:
+                    try:
+                        data[subfield.attname] = self.convert_value_from_db(
+                            value[subfield.column], db_subinfo(subfield))
+                    except KeyError:
+                        pass
+
+                # Create and return a model instance, so the field
+                # doesn't have to use the SubfieldBase metaclass.
+                # Note: double underline is not a typo.
+                value = model(__entity_exists=True, **data)
+
+            else:
+                value = dict(
+                    (key, self.convert_value_from_db(subvalue, db_subinfo(key)))
+                    for key, subvalue in value.iteritems())
 
         return value
 

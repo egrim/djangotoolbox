@@ -2,7 +2,7 @@
 
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.utils.importlib import import_module
+
 
 
 __all__ = ('RawField', 'ListField', 'DictField', 'SetField',
@@ -247,9 +247,10 @@ class EmbeddedModelField(models.Field):
 
     :param model: (optional) The model class that shall be embedded
                   (may also be passed as string similar to relation fields)
-    """
-    __metaclass__ = models.SubfieldBase
 
+    TODO: Delegate all signals and other field methods to the embedded
+          instance (rather than just pre_save and get_db_prep_value).
+    """
     def __init__(self, model=None, *args, **kwargs):
         self.embedded_model = model
         kwargs.setdefault('default', None)
@@ -258,30 +259,15 @@ class EmbeddedModelField(models.Field):
     def get_internal_type(self):
         return 'EmbeddedModelField'
 
-    def value_field(self, column):
+    def value_field(self, field):
         """
-        Returns a field for the given database column.
+        Returns a field for some value from an embedded instance.
 
-        This is called from database conversion routines, so has to use
-        column rather than attribute names, as the dict passed down
-        uses database columns as keys.
+        We've used fields as dictionary keys, otherwise we'd not be
+        able to determine the field of a value from a model in an
+        untyped collection.
         """
-
-        # Generic embedding case, return one RawField instance for all
-        # values, so db_info is computed just once and for consistency
-        # with untyped list / dict fields.
-        if self.embedded_model is None:
-            if not hasattr(self, '_embedded_raw_field'):
-                self._embedded_raw_field = RawField()
-            return self._embedded_raw_field
-
-        # Django does not have a ready method to map database column
-        # names to fields; compute the mapping once.
-        else:
-            if not hasattr(self, '_embedded_column_to_field'):
-                self._embedded_column_to_field = dict((field.column, field)
-                    for field in self.embedded_model._meta.fields)
-            return self._embedded_column_to_field[column]
+        return field
 
     def _set_model(self, model):
         # We need to know the model to generate a valid key for the lookup but
@@ -301,63 +287,73 @@ class EmbeddedModelField(models.Field):
 
         self._model = model
 
-    model = property(lambda self:self._model, _set_model)
+    model = property(lambda self: self._model, _set_model)
 
     def pre_save(self, model_instance, _):
+        """
+        Returns a tuple with model_info and field => value mapping
+        instead of the embedded instance (that is the actual value).
+        Also applies pre_save of embedded instance fields.
+
+        The embedded instance will be saved as a column => value dict
+        in the end (possibly augmented with info about instance's model
+        for untyped embedding), but because we need to know the fields
+        of subvalues in base conversion routines, we need to entrust
+        them with creating the dict.
+        """
         embedded_instance = getattr(model_instance, self.attname)
         if embedded_instance is None:
-            return None, None
+            return None
 
+        # Field's value should be an instance of the model given in its
+        # declaration or at least of some model.
         model = self.embedded_model or models.Model
         if not isinstance(embedded_instance, model):
-            raise TypeError("Expected instance of type %r, not %r"
+            raise TypeError('Expected instance of type %r, not %r'
                             % (model, type(embedded_instance)))
 
-        values = []
+        # Apply pre_save of embedded instance fields, create the
+        # field => value mapping to be passed below.
+        field_values = {}
+        add = not embedded_instance._entity_exists
         for field in embedded_instance._meta.fields:
-            add = not embedded_instance._entity_exists
             value = field.pre_save(embedded_instance, add)
+
+            # Exclude unset primary keys (e.g. {"id" : None}). TODO: Why?
             if field.primary_key and value is None:
-                # exclude unset pks ({"id" : None})
                 continue
-            values.append((field, value))
 
-        return embedded_instance, values
+            field_values[field] = value
 
-    def get_db_prep_value(self, (embedded_instance, value_list), **kwargs):
-        if value_list is None:
-            return None
-        values = dict((field.column, field.get_db_prep_value(value, **kwargs))
-                      for field, value in value_list)
+        # If we don't have a fixed model class, save model info of the
+        # instance we're saving to be able to reinstantiate it after
+        # fetching values from the database.
         if self.embedded_model is None:
-            values.update({'_module' : embedded_instance.__class__.__module__,
-                           '_model'  : embedded_instance.__class__.__name__})
-        # This instance will exist in the db very soon.
+            model = embedded_instance
+        else:
+            model = None
+
+        # This instance will exist in the database soon.
         embedded_instance._entity_exists = True
-        return values
+
+        # TODO: model, values, save_model_info
+        return model, field_values
+
+    def get_db_prep_value(self, value, **kwargs):
+        """
+        Lets embedded model's fields prepare their values.
+        """
+        if value is None:
+            return None
+
+        model, field_values = value
+        for field, value in field_values.iteritems():
+            field_values[field] = field.get_db_prep_value(value, **kwargs)
+
+        return model, field_values
 
     # TODO/XXX: Remove this once we have a cleaner solution.
     def get_db_prep_lookup(self, lookup_type, value, connection, prepared=False):
         if hasattr(value, 'as_lookup_value'):
             value = value.as_lookup_value(self, lookup_type, connection)
         return value
-
-    def to_python(self, values):
-        if not isinstance(values, dict):
-            return values
-
-        module, model = values.pop('_module', None), values.pop('_model', None)
-        if module is not None:
-            model = getattr(import_module(module), model)
-        else:
-            model = self.embedded_model
-
-        data = {}
-        for field in model._meta.fields:
-            try:
-                # TODO/XXX: str(...) is a workaround for old Python releases.
-                # Remove this someday.
-                data[str(field.attname)] = values[field.column]
-            except KeyError:
-                pass
-        return model(__entity_exists=True, **data)

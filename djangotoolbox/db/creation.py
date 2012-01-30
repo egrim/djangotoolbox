@@ -63,12 +63,14 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
 
     def db_info(self, field):
         """
-        Returns a tuple of (field_type, db_type, db_table, db_subinfo)
+        Returns a tuple of (field, db_type, db_table, db_subinfo)
         containing all info needed to encode field's value for a nonrel
         database. Used by convert_value_to/from_db.
 
-        The first argument is just the field's internal type (kind); it
-        is needed to do what missing value_to_db_* methods could do.
+        The first argument is a field with the same properties that the
+        field the value comes from, note that it doesn't need to hold
+        any value; it is needed to do what missing value_to_db_* methods
+        could do and for untyped embedded fields deconversion.
 
         We put db_table alongside field db_type -- to allow back-ends
         having separate key spaces for different tables to create keys
@@ -91,26 +93,26 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
 
         a db_info for the "post" field could be:
 
-            ('EmbeddedModelField', 'dict', 'blog',
-                 func('post_id' => ('AutoField', 'key', 'post', None)))
+            (EmbeddedModelField, 'dict', 'blog',
+                 func(Post's AutoField => (AutoField, 'key', 'post', None)))
 
         and for the "posts" field it could be:
 
-            ('ListField', 'list', 'blog',
-                 func(0 => ('ForeignKey', 'key', 'post', None)))
+            (ListField, 'list', 'blog',
+                 func(0 => (ForeignKey, 'key', 'post', None)))
         """
 
         # Memoize the result on the field to improve performance for
         # typed collections (that use just one field for all items).
         if not hasattr(field, '_db_info'):
 
-            # Field type is usually just the base field class name,
-            # while db_type is usually expected value's type or "key".
-            field_type = field.get_internal_type()
+            # General conversions need db_type and it is the only thing
+            # back-ends should care about.
             db_type = self.db_type(field)
 
             # For ForeignKey, OneToOneField and ManyToManyField use the
             # table of the model the field refers to.
+            # TODO: Move to GAE?
             if field.rel is not None:
                 db_table = field.rel.to._meta.db_table
             else:
@@ -121,14 +123,14 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
 
             # Collection fields should provide a value_field method that
             # determines the field a value belongs to, turn it into a
-            # method computing db_info for this field.
+            # method computing db_info for that field.
             if hasattr(field, 'value_field'):
                 db_subinfo = lambda *args: self.db_info(
                     field.value_field(*args))
             else:
                 db_subinfo = lambda *args: None
 
-            field._db_info = (field_type, db_type, db_table, db_subinfo)
+            field._db_info = (field, db_type, db_table, db_subinfo)
 
         return field._db_info
 
