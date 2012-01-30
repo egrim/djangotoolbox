@@ -314,7 +314,7 @@ class EmbeddedModelField(models.Field):
         # This instance will exist in the database soon.
         embedded_instance._entity_exists = True
 
-        # TODO: model, values, save_model_info
+        # TODO: model, values (list), save_model_info (bool)
         return model, field_values
 
     def get_db_prep_value(self, value, **kwargs):

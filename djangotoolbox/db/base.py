@@ -255,7 +255,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         # convert them to just strings for type-inspecting back-ends.
         if isinstance(value, (SafeString, EscapeString)):
              value = str(value)
-        if isinstance(value, (SafeUnicode, EscapeUnicode)):
+        elif isinstance(value, (SafeUnicode, EscapeUnicode)):
              value = unicode(value)
 
         # Convert elements of collection fields -- we base this on
@@ -266,10 +266,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             subkind = subfield.get_internal_type()
             db_subtype = subfield.db_type()
 
-            # Note that collection field lookup values are plain values
-            # rather than collections, but they still should be
-            # converted as a collection item (assuming all items or
-            # values are converted in the same way).
+            # Collection field lookup values are plain values rather
+            # than collections, but they still should be converted as
+            # a collection item (assuming all items or values are
+            # converted in the same way).
             if lookup:
                 value = self.convert_value_for_db(value, subfield, subkind,
                                                   db_subtype, lookup)
@@ -290,17 +290,14 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                                                   db_subtype, lookup)
                         for subvalue in value)
 
-                # Cast to the type requested by the back-end. Note that
-                # this can result in a list with pairs; generally
-                # comparisons of collections are not well-defined
-                # anyway.
+                # Cast to the type requested by the back-end. This can
+                # result in a list with pairs; generally comparisons of
+                # collections are not well-defined anyway.
                 if db_type == 'list':
                     value = list(value)
                 elif db_type == 'set':
                     value = set(value)
                 elif db_type == 'dict':
-                    assert field_kind == 'DictField', \
-                        'dict type cannot be used for flat collection fields'
                     value = dict(value)
 
         # We will save field.column => value pairs as a dict or list,
@@ -310,6 +307,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         # following back-end conversions.
         # TODO: How should EmbeddedModelField lookups work?
         elif field_kind == 'EmbeddedModelField':
+            if lookup:
+                raise NotImplementedError('Needs specification')
+
             model, field_values = value
 
             # Convert using proper instance field's info, change keys
@@ -321,17 +321,19 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                                            subfield.db_type(), lookup))
                 for subfield, subvalue in field_values.iteritems())
 
-            # Allow dict or list as storage types.
+            # For untyped embedding store model info alongside field
+            # values.
+            if model is not None:
+                value = list(value) + [
+                    ('_module', model.__class__.__module__),
+                    ('_model', model.__class__.__name__)]
+
+            # Allow dict or list (of pairs) as storage types.
+            # TODO: Sets would likely work too.
             if db_type == 'list':
                 value = list(value)
             elif db_type == 'dict':
-               value = dict(value)
-
-            # Store model info alongside values for untyped embedding;
-            # if none is given the field uses a fixed model.
-            if model is not None:
-                value['_module'] = model.__class__.__module__
-                value['_model'] = model.__class__.__name__
+                value = dict(value)
 
         return value
 
@@ -359,14 +361,16 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         if value is None:
             return None
 
-        # Deconvert items or values of a collection field.
+        # Deconvert items or values of a collection field and cast to
+        # the format expected by the field (the value will normally not
+        # go through to_python).
         if field_kind in ('ListField', 'SetField', 'DictField',):
             subfield = field.item_field
             subkind = subfield.get_internal_type()
             db_subtype = subfield.db_type()
 
             if field_kind == 'DictField':
-                value = (
+                value = dict(
                     (key, self.convert_value_from_db(subvalue, subfield,
                                                      subkind, db_subtype))
                     for key, subvalue in value.iteritems())
@@ -376,30 +380,27 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                                                subkind, db_subtype)
                     for subvalue in value)
 
-            # Cast to the format expected by the field (the value will
-            # not go through to_python).
-            if field_kind == 'ListField':
-                value = list(value)
-            elif field_kind == 'SetField':
-                value = set(value)
-            elif field_kind == 'DictField':
+                if field_kind == 'ListField':
+                    value = list(value)
+                elif field_kind == 'SetField':
+                    value = set(value)
+
+        # Embedded instances are stored as a (column, value) dict or
+        # list, possibly augmented with model class info.
+        elif field_kind == 'EmbeddedModelField':
+            if db_type == 'list':
                 value = dict(value)
-
-        # Embedded instance may need to load its model class first,
-        # so we know fields to be used for value deconversions.
-        if field_kind == 'EmbeddedModelField':
-
-            # TODO: Dict / list model info decoding.
 
             # We either use the model stored alongside the values
             # (untyped embedding) or the one provided by the field
             # (typed embedding).
+            # Try the stored values first to support fixing type.
             module = value.pop('_module', None)
             model = value.pop('_model', None)
-            if module is None:
-                model = field.embedded_model
-            else:
+            if module is not None and model is not None:
                 model = getattr(import_module(module), model)
+            else:
+                model = field.embedded_model
 
             # Deconvert field values and prepare a dict that can be
             # used to initialize a model. Leave fields for which no
@@ -413,9 +414,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                 except KeyError:
                     pass
 
-            # Create and return a model instance, so the field
-            # doesn't have to use the SubfieldBase metaclass.
-            # Note: double underline is not a typo.
+            # Create and return a model instance, so the field doesn't
+            # have to use the SubfieldBase metaclass.
+            # Note: double underline is not a typo -- let the field
+            # know that the object already exists in the database.
             value = model(__entity_exists=True, **data)
 
         return value

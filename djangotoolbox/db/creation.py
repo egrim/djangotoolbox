@@ -48,10 +48,10 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'XMLField':                   'string',
 
         # Mappings for fields provided by nonrel. You may use "list"
-        # for SetFields if your database cannot store sets directly,
-        # but note that the same set may be represented by different
-        # lists (with elements in different order), so lookups may
-        # have some quirks if you do so.
+        # for SetFields, DictField or EmbeddedModelField, but note
+        # that the same set or dict may be represented by different
+        # lists (with elements in different order), so order of such
+        # data is undetermined.
         'RawField':                   'raw',
         'BlobField':                  'bytes',
         'AbstractIterableField':      'list',
@@ -77,7 +77,6 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         TODO: Doesn't seem necessary any longer. Also remove all
               references to "RelatedAutoField".
         """
-#        raise Error('Not used?')
         if self.connection.features.has_single_key_type:
              return 'key'
         return super(NonrelDatabaseCreation, self).db_type(field)
