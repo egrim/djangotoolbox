@@ -506,3 +506,37 @@ class LazyObjectsTest(TestCase):
         self.assertEqual(list(String.objects.filter(s__startswith=mark_safe('c'))), [c])
         self.assertEqual(String.objects.get(s=mark_for_escaping('c')), c)
         self.assertEqual(list(String.objects.filter(s__startswith=mark_for_escaping('c'))), [c])
+
+
+@unittest.skip('Research using key fetched from a list in the database as a model')
+class InstanceAsForeignKeyTest(TestCase):
+    """
+    Some find it natural to use model instances instead of foreign keys
+    in some circumstances.
+    """
+    def test_primary_key(self):
+        class Model(models.Model):
+            pass
+        model = Model.objects.create()
+        with self.assertRaises(TypeError):
+            Model.objects.get(pk=model)
+
+    def test_foreign_key(self):
+        class Parent(models.Model):
+            pass
+        class Child(models.Model):
+            parent = models.ForeignKey(Parent)
+        parent = Parent.objects.create()
+        child = Child.objects.create(parent=parent)
+        self.assertEqual(Child.objects.get(parent=parent), child)
+
+    def test_list_with_foreignkeys(self):
+        class Model(models.Model):
+            pass
+        class ReferenceList(models.Model):
+            keys = ListField(models.ForeignKey(Model))
+        model1 = Model.objects.create()
+        model2 = Model.objects.create()
+        rl = ReferenceList.objects.create(keys=[model1, model2])
+        self.assertEqual(ReferenceList.objects.get().keys[0], model1)
+        self.assertEqual(len(ReferenceList.objects.filter(keys=model1)), 1)
