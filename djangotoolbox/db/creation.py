@@ -20,7 +20,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'OneToOneField':              'key',
         'ManyToManyField':            'key',
 
-        # Standard field types, more or less suitable fora  database
+        # Standard field types, more or less suitable for a database
         # (or its client / driver) being able to directly store or
         # process Python objects.
         'BigIntegerField':            'long',
@@ -48,10 +48,11 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'XMLField':                   'string',
 
         # Mappings for fields provided by nonrel. You may use "list"
-        # for SetFields, DictField or EmbeddedModelField, but note
-        # that the same set or dict may be represented by different
-        # lists (with elements in different order), so order of such
-        # data is undetermined.
+        # for SetFields, or even DictField and EmbeddedModelField (if
+        # your database supports nested lists), but note that the same
+        # set or dict may be represented by different lists (with
+        # elements in different order), so order of such data is
+        # undetermined.
         'RawField':                   'raw',
         'BlobField':                  'bytes',
         'AbstractIterableField':      'list',

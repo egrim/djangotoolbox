@@ -275,8 +275,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                                                   db_subtype, lookup)
 
             # Create a generator yielding processed items or pairs with
-            # processed subvalues. Treats values from unknown kinds as
-            # flat collections / iterables.
+            # processed subvalues, use it to produce a collection of
+            # the requested type. If an unknown db_type is specified,
+            # passes the generator to the back-end.
             else:
                 if field_kind == 'DictField':
                     value = (
@@ -284,31 +285,39 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                                                         subkind, db_subtype,
                                                         lookup))
                         for key, subvalue in value.iteritems())
+
+                    # Allow a dict or a flat list with keys and values
+                    # interleaved to be used for storage (list of pairs
+                    # is not enough because tuples may need conversion).
+                    if db_type == 'list':
+                        value = list(item for pair in value for item in pair)
+                    elif db_type == 'dict':
+                        value = dict(value)
+
                 else:
                     value = (
                         self.convert_value_for_db(subvalue, subfield, subkind,
                                                   db_subtype, lookup)
                         for subvalue in value)
 
-                # Cast to the type requested by the back-end. This can
-                # result in a list with pairs; generally comparisons of
-                # collections are not well-defined anyway.
-                if db_type == 'list':
-                    value = list(value)
-                elif db_type == 'set':
-                    value = set(value)
-                elif db_type == 'dict':
-                    value = dict(value)
+                    # Cast to the type requested by the back-end.
+                    if db_type == 'list':
+                        value = list(value)
+                    elif db_type == 'set':
+                        # assert field_kind != 'ListField'
+                        value = set(value)
 
         # We will save field.column => value pairs as a dict or list,
         # possibly augmented# with model info (to be able to deconvert
         # the embedded instance for untyped fields).
         # The resulting dict or list can be processed as any other in
         # following back-end conversions.
-        # TODO: How should EmbeddedModelField lookups work?
         elif field_kind == 'EmbeddedModelField':
+
+            # TODO: How should EmbeddedModelField lookups work?
             if lookup:
-                raise NotImplementedError('Needs specification')
+                return value
+                # raise NotImplementedError('Needs specification')
 
             model, field_values = value
 
@@ -328,10 +337,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                     ('_module', model.__class__.__module__),
                     ('_model', model.__class__.__name__)]
 
-            # Allow dict or list (of pairs) as storage types.
-            # TODO: Sets would likely work too.
+            # Allow dict or flat list (with columns and values
+            # interleaved) as storage types.
             if db_type == 'list':
-                value = list(value)
+                value = list(item for pair in value for item in pair)
             elif db_type == 'dict':
                 value = dict(value)
 
@@ -370,10 +379,15 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             db_subtype = subfield.db_type()
 
             if field_kind == 'DictField':
+                if db_type == 'list':
+                    value = zip(value[::2], value[1::2])
+                else:
+                    value = value.iteritems()
+
                 value = dict(
                     (key, self.convert_value_from_db(subvalue, subfield,
                                                      subkind, db_subtype))
-                    for key, subvalue in value.iteritems())
+                    for key, subvalue in value)
             else:
                 value = (
                     self.convert_value_from_db(subvalue, subfield,
@@ -386,10 +400,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                     value = set(value)
 
         # Embedded instances are stored as a (column, value) dict or
-        # list, possibly augmented with model class info.
+        # flattened list; possibly augmented with model class info.
         elif field_kind == 'EmbeddedModelField':
             if db_type == 'list':
-                value = dict(value)
+                value = dict(zip(value[::2], value[1::2]))
 
             # We either use the model stored alongside the values
             # (untyped embedding) or the one provided by the field
