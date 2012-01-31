@@ -269,15 +269,15 @@ class EmbeddedModelField(models.Field):
 
     def pre_save(self, model_instance, _):
         """
-        Returns a tuple with model_info and field => value mapping
-        instead of the embedded instance (that is the actual value).
+        Passes a tuple with embedded_instance, field => value mapping
+        and decision on saving model info down to convert_value_for_db.
         Also applies pre_save of embedded instance fields.
 
         The embedded instance will be saved as a column => value dict
         in the end (possibly augmented with info about instance's model
-        for untyped embedding), but because we need to know the fields
-        of subvalues in base conversion routines, we need to entrust
-        them with creating the dict.
+        for untyped embedding), but because we need to know fields of
+        subvalues in base conversion routines, we need to entrust them
+        with creating and augmenting the dict.
         """
         embedded_instance = getattr(model_instance, self.attname)
         if embedded_instance is None:
@@ -291,7 +291,7 @@ class EmbeddedModelField(models.Field):
                             % (model, type(embedded_instance)))
 
         # Apply pre_save of embedded instance fields, create the
-        # field => value mapping to be passed below.
+        # field => value mapping to be passed to storage preprocessing.
         field_values = {}
         add = not embedded_instance._entity_exists
         for field in embedded_instance._meta.fields:
@@ -306,16 +306,13 @@ class EmbeddedModelField(models.Field):
         # If we don't have a fixed model class, save model info of the
         # instance we're saving to be able to reinstantiate it after
         # fetching values from the database.
-        if self.embedded_model is None:
-            model = embedded_instance
-        else:
-            model = None
+        save_model_info = (self.embedded_model is None)
 
         # This instance will exist in the database soon.
+        # TODO: Ensure that this doesn't cause race conditions.
         embedded_instance._entity_exists = True
 
-        # TODO: model, values (list), save_model_info (bool)
-        return model, field_values
+        return embedded_instance, field_values, save_model_info
 
     def get_db_prep_value(self, value, **kwargs):
         """
@@ -324,11 +321,11 @@ class EmbeddedModelField(models.Field):
         if value is None:
             return None
 
-        model, field_values = value
+        embedded_instance, field_values, save_model_info = value
         for field, value in field_values.iteritems():
             field_values[field] = field.get_db_prep_value(value, **kwargs)
 
-        return model, field_values
+        return embedded_instance, field_values, save_model_info
 
     # TODO/XXX: Remove this once we have a cleaner solution.
     def get_db_prep_lookup(self, lookup_type, value, connection, prepared=False):

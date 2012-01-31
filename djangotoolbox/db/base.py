@@ -308,7 +308,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                         value = set(value)
 
         # We will save field.column => value pairs as a dict or list,
-        # possibly augmented# with model info (to be able to deconvert
+        # possibly augmented with model info (to be able to deconvert
         # the embedded instance for untyped fields).
         # The resulting dict or list can be processed as any other in
         # following back-end conversions.
@@ -319,7 +319,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                 return value
                 # raise NotImplementedError('Needs specification')
 
-            model, field_values = value
+            embedded_instance, field_values, save_model_info = value
 
             # Convert using proper instance field's info, change keys
             # from fields to columns.
@@ -332,10 +332,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
             # For untyped embedding store model info alongside field
             # values.
-            if model is not None:
+            if save_model_info:
                 value = list(value) + [
-                    ('_module', model.__class__.__module__),
-                    ('_model', model.__class__.__name__)]
+                    ('_module', embedded_instance.__class__.__module__),
+                    ('_model', embedded_instance.__class__.__name__)]
 
             # Allow dict or flat list (with columns and values
             # interleaved) as storage types.
