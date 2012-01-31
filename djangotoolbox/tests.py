@@ -211,6 +211,17 @@ class IterableFieldsTest(TestCase):
         self.assertEqual(ReferenceList.objects.get().keys[0], model1.pk)
         self.assertEqual(len(ReferenceList.objects.filter(keys=model1.pk)), 1)
 
+    @unittest.skip('Hardly doable for some back-ends')
+    def test_nested_list(self):
+        """
+        Some back-ends expect lists to be strongly typed or not contain
+        other lists (e.g. GAE), this limits how the ListField can be
+        used (unless the back-end were to serialize all lists).
+        """
+        class UntypedListModel(models.Model):
+            untyped_list = ListField()
+        UntypedListModel.objects.create(untyped_list=[1, [2, 3]])
+
 
 class BaseModel(models.Model):
     pass
