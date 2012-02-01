@@ -1,9 +1,9 @@
-from django.db import models, connections
+from django.db import connection, models
 from django.db.models import Q
 from django.db.models.signals import post_save
 from django.db.utils import DatabaseError
 from django.dispatch.dispatcher import receiver
-from django.test import TestCase
+from django.test import TestCase, skipUnlessDBFeature
 from django.utils import unittest
 
 from .fields import ListField, SetField, DictField, EmbeddedModelField
@@ -18,7 +18,7 @@ def count_calls(func):
 
 
 # We will skip some tests if the database can't store dicts.
-supports_dicts = getattr(connections['default'].features, 'supports_dicts', False)
+supports_dicts = getattr(connection.features, 'supports_dicts', False)
 
 
 class Target(models.Model):
@@ -176,7 +176,7 @@ class IterableFieldsTest(TestCase):
         # an empty list
         SetModel().save()
 
-    @unittest.skipIf(not supports_dicts, "Backend doesn't support dicts")
+    @skipUnlessDBFeature('supports_dicts')
     def test_dictfield(self):
         DictModel(dictfield=dict(a=1, b='55', foo=3.14),
                   auto_now={'a' : None}).save()
@@ -211,7 +211,7 @@ class IterableFieldsTest(TestCase):
         self.assertEqual(ReferenceList.objects.get().keys[0], model1.pk)
         self.assertEqual(len(ReferenceList.objects.filter(keys=model1.pk)), 1)
 
-    @unittest.skip('Hardly doable for some back-ends')
+    @unittest.expectedFailure
     def test_nested_list(self):
         """
         Some back-ends expect lists to be strongly typed or not contain
@@ -261,6 +261,7 @@ if supports_dicts:
         auto_now = models.DateTimeField(auto_now=True)
         auto_now_add = models.DateTimeField(auto_now_add=True)
 
+@skipUnlessDBFeature('supports_dicts')
 class EmbeddedModelFieldTest(TestCase):
     def assertEqualDatetime(self, d1, d2):
         """Compares d1 and d2, ignoring microseconds."""
@@ -392,10 +393,6 @@ class EmbeddedModelFieldTest(TestCase):
         self.assertIsInstance(simple.__dict__['some_relation_id'], type(obj.id))
         self.assertIsInstance(simple.some_relation, DictModel)
 
-EmbeddedModelFieldTest = unittest.skipIf(
-    not supports_dicts, "Backend doesn't support dicts")(
-    EmbeddedModelFieldTest)
-
 
 class SignalTest(TestCase):
     def test_post_save(self):
@@ -508,11 +505,12 @@ class LazyObjectsTest(TestCase):
         self.assertEqual(list(String.objects.filter(s__startswith=mark_for_escaping('c'))), [c])
 
 
-@unittest.skip('Research using key fetched from a list in the database as a model')
 class InstanceAsForeignKeyTest(TestCase):
     """
-    Some find it natural to use model instances instead of foreign keys
+    We find it natural to use model instances instead of foreign keys
     in some circumstances.
+
+    TODO: Add tests for DictField / EmbeddedModelField.
     """
     def test_primary_key(self):
         class Model(models.Model):
@@ -522,21 +520,28 @@ class InstanceAsForeignKeyTest(TestCase):
             Model.objects.get(pk=model)
 
     def test_foreign_key(self):
-        class Parent(models.Model):
+        class SingleParent(models.Model):
             pass
-        class Child(models.Model):
-            parent = models.ForeignKey(Parent)
-        parent = Parent.objects.create()
-        child = Child.objects.create(parent=parent)
-        self.assertEqual(Child.objects.get(parent=parent), child)
+        class SingleChild(models.Model):
+            parent = models.ForeignKey(SingleParent)
+        parent = SingleParent.objects.create()
+        child = SingleChild.objects.create(parent=parent)
+        self.assertEqual(child.parent, parent)
+        self.assertEqual(SingleChild.objects.get(parent=parent), child)
+        self.assertEqual(SingleChild.objects.get(parent=parent).parent, parent)
+        self.assertEqual(len(SingleChild.objects.filter(parent=parent)), 1)
 
+    @unittest.expectedFailure
     def test_list_with_foreignkeys(self):
-        class Model(models.Model):
+        # Research using key fetched from a list in the database as a model.
+        class MultiParent(models.Model):
             pass
-        class ReferenceList(models.Model):
-            keys = ListField(models.ForeignKey(Model))
-        model1 = Model.objects.create()
-        model2 = Model.objects.create()
-        rl = ReferenceList.objects.create(keys=[model1, model2])
-        self.assertEqual(ReferenceList.objects.get().keys[0], model1)
-        self.assertEqual(len(ReferenceList.objects.filter(keys=model1)), 1)
+        class MultiChild(models.Model):
+            parents = ListField(models.ForeignKey(MultiParent))
+        parent1 = MultiParent.objects.create()
+        parent2 = MultiParent.objects.create()
+        child = MultiChild.objects.create(parents=[parent1, parent2])
+        self.assertEqual(child.parents, [parent1, parent2])
+        self.assertEqual(MultiChild.objects.get(parents=parent1), child)
+        self.assertEqual(MultiChild.objects.get(parent=parent).parents, [parent1, parent2])
+        self.assertEqual(len(MultiChild.objects.filter(parents=parent1)), 1)
