@@ -28,12 +28,6 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
     supports_select_related = False
     supports_deleting_related_objects = False
 
-    # Does the database use one type for all keys and references or
-    # can any type be used? If set to True, all primary keys, foreign
-    # keys and other references will have a "key" db_type, otherwise
-    # the db_type set for field kind will be used for type conversions.
-    has_single_key_type = True
-
     # Can primary_key be used on any field? Without encoding usually
     # only a limited set of types is acceptable for keys. This is a set
     # of all field kinds (internal_types) for which the primary_key
@@ -45,7 +39,8 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
             'RawField', 'BlobField',))
 
     # Can a dictionary be saved / fetched from the database.
-    # TODO: Remove once "list" is supported for all collection fields.
+    # TODO: Remove, unless someone can find a database that really
+    #       can't handle dicts (using serialization or nested lists).
     supports_dicts = False
 
     def _supports_transactions(self):

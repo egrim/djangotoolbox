@@ -281,9 +281,20 @@ class NonrelCompiler(SQLCompiler):
     """
     Base class for data fetching back-end compilers.
 
-    Note that nonrel compilers derive from the sql.SQLCompiler and thus
-    hold a reference to a sql.Query, not a NonrelQuery.
+    Note that nonrel compilers derive from sql.compiler.SQLCompiler and
+    thus hold a reference to a sql.Query, not a NonrelQuery.
+
+    TODO: Separate FetchCompiler from the abstract NonrelCompiler.
     """
+
+    def __init__(self, query, connection, using):
+        """
+        Save pointers to DatabaseCreation and DatabaseOperations for
+        quick access in conversion wrappers.
+        """
+        super(NonrelCompiler, self).__init__(query, connection, using)
+        self.creation = self.connection.creation
+        self.ops = self.connection.ops
 
     # ----------------------------------------------
     # Public API
@@ -443,9 +454,9 @@ class NonrelCompiler(SQLCompiler):
         Does type-conversions needed before storing a value in the
         the database or using it as a filter parameter.
 
-        This is a convience wrapper, that only precomputes field_kind
-        and db_type and calls DatabaseOperations method to do the real
-        work; you should typically extend the DatabaseOperations
+        This is a convience wrapper that only precomputes field_kind
+        and nonrel_db_type and calls DatabaseOperations method to do
+        the real work; you should typically extend the operations class
         method, but only call this one.
 
         Note that compilers may do conversions without building a
@@ -457,8 +468,9 @@ class NonrelCompiler(SQLCompiler):
         :param lookup: Is the value being prepared as a filter
                        parameter or for storage
         """
-        return self.connection.ops.convert_value_for_db(value,
-            field, field.get_internal_type(), field.db_type(), lookup)
+        return self.ops.convert_value_for_db(value, field,
+            field.get_internal_type(),
+            self.creation.nonrel_db_type(field), lookup)
 
     def convert_value_from_db(self, value, field):
         """
@@ -467,11 +479,17 @@ class NonrelCompiler(SQLCompiler):
         :param value: A value received from the database client
         :param field: A field the value is meant for
         """
-        return self.connection.ops.convert_value_from_db(value,
-            field, field.get_internal_type(), field.db_type())
+        return self.ops.convert_value_from_db(value, field,
+            field.get_internal_type(),
+            self.creation.nonrel_db_type(field))
 
 
 class NonrelInsertCompiler(NonrelCompiler):
+    """
+    Base class for all compliers that create new entities or objects
+    in the database. It has to define execute_sql method due to being
+    used in place of a SQLInsertCompiler.
+    """
     def execute_sql(self, return_id=False):
         data = {}
         for (field, value), column in zip(self.query.values, self.query.columns):

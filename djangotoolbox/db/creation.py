@@ -62,25 +62,31 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'EmbeddedModelField':         'dict',
     }
 
-    def db_type(self, field):
+    def nonrel_db_type(self, field):
         """
-        If the databases has a special type used for all keys, returns
-        "key" for all primary key fields and related fields independent
-        of the field class; otherwise uses the original Django's logic.
-        """
-        if self.connection.features.has_single_key_type and \
-            (field.primary_key or field.rel is not None):
-            return 'key'
-        return super(NonrelDatabaseCreation, self).db_type(field)
+        Returns "key" for all primary key and foreign key fields
+        independent of the field's own logic, for non key fields
+        uses the original Django's db_type logic.
 
-    def related_db_type(self, field):
+        Note: we can't simply redefine db_type here because we may want
+        to override db_type a field may return directly.
+
+        TODO: Field.db_type (as of 1.3.1) is used mostly for generating
+              SQL statements (through a couple of methods in
+              DatabaseCreation and DatabaseOperations.field_cast_sql)
+              or within back-end implementations -- nonrel is not
+              dependend on any of these; but there are two cases that
+              might need to be fixed, namely:
+              -- management/createcachetable (calls field.db_type),
+              -- and contrib/gis (defines its own geo_db_type method).
+
+        TODO: related_db_type and related changes are now only needed
+              for "legacy" storage methods. At some point also remove
+              all instances of "RelatedAutoField".
         """
-        TODO: Doesn't seem necessary any longer. Also remove all
-              references to "RelatedAutoField".
-        """
-        if self.connection.features.has_single_key_type:
-             return 'key'
-        return super(NonrelDatabaseCreation, self).db_type(field)
+        if field.primary_key or field.rel is not None:
+            return 'key'
+        return field.db_type()
 
     def sql_create_model(self, model, style, known_models=set()):
         """
