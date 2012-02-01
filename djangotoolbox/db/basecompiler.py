@@ -137,9 +137,18 @@ class NonrelQuery(object):
         alias, column, db_type = packed
         field = constraint.field
 
-        if alias and alias != self.query.model._meta.db_table:
+        opts = self.query.model._meta
+        if alias and alias != opts.db_table:
             raise DatabaseError("This database doesn't support JOINs "
                                 "and multi-table inheritance.")
+
+        # For parent.child_set queries the field held by the constraint
+        # is the parent's primary key, while the field the filter
+        # should consider is the child's foreign key field.
+        if column != field.column:
+            assert field.primary_key
+            field = (f for f in opts.fields if f.column == column).next()
+            assert field.rel is not None
 
         value = self._normalize_lookup_value(
             lookup_type, value, field, annotation)

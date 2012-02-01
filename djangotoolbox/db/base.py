@@ -83,8 +83,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
     def pk_default_value(self):
         """
-        Returns None as a way to ask the back-end to generate a new
-        key for an "inserted" object.
+        Returns None, to be interpreted by back-ends as a request to
+        generate a new key for an "inserted" object.
         """
         return None
 

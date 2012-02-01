@@ -71,6 +71,8 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         Note: we can't simply redefine db_type here because we may want
         to override db_type a field may return directly.
 
+        :param field: A field we want to know the storage type of
+
         TODO: Field.db_type (as of 1.3.1) is used mostly for generating
               SQL statements (through a couple of methods in
               DatabaseCreation and DatabaseOperations.field_cast_sql)
