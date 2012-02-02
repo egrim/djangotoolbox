@@ -423,7 +423,6 @@ class EmbeddedModelFieldTest(TestCase):
         self.assertEqual(parent.embedded_list, [child2])
         self.assertEqual(parent.embedded_dict, {'b': child1})
 
-
 class SignalTest(TestCase):
     def test_post_save(self):
         created = []

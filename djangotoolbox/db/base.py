@@ -327,6 +327,10 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                                            lookup))
                 for subfield, subvalue in field_values.iteritems())
 
+            # Embedded instance fields used not to be converted.
+            if field.__class__.__name__ == 'LegacyEmbeddedModelField':
+                value = ((f.column, v) for f, v in field_values.iteritems())
+
             # For untyped embedding store model info alongside field
             # values.
             if save_model_info:
@@ -402,6 +406,15 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             if db_type == 'list':
                 value = dict(zip(value[::2], value[1::2]))
 
+            # Compatibility with old LegacyEmbeddedModelField (model
+            # info used to be serialized differently before 0.2).
+            if field.__class__.__name__ == 'LegacyEmbeddedModelField':
+                value.pop('_app', None)
+                if '_module' not in value:
+                    value.pop('_model', None)
+                if '_id' in value:
+                    value['id'] = value.pop('_id')
+
             # We either use the model stored alongside the values
             # (untyped embedding) or the one provided by the field
             # (typed embedding).
@@ -412,6 +425,12 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                 model = getattr(import_module(module), model)
             else:
                 model = field.embedded_model
+
+            # Embedded instance fields used not to be deconverted.
+            if field.__class__.__name__ == 'LegacyEmbeddedModelField':
+                return model(__entity_exists=True, **dict(
+                    (f.attname, value[f.column]) for f in model._meta.fields
+                    if (f.column in value)))
 
             # Deconvert field values and prepare a dict that can be
             # used to initialize a model. Leave fields for which no
