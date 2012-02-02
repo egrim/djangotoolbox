@@ -259,7 +259,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         if field_kind in ('ListField', 'SetField', 'DictField',):
             subfield = field.item_field
             subkind = subfield.get_internal_type()
-            db_subtype = subfield.db_type()
+            db_subtype = subfield.db_type(connection=self.connection)
 
             # Collection field lookup values are plain values rather
             # than collections, but they still should be converted as
@@ -322,7 +322,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                 (subfield.column,
                  self.convert_value_for_db(subvalue, subfield,
                                            subfield.get_internal_type(),
-                                           subfield.db_type(), lookup))
+                                           subfield.db_type(
+                                               connection=self.connection),
+                                           lookup))
                 for subfield, subvalue in field_values.iteritems())
 
             # For untyped embedding store model info alongside field
@@ -371,7 +373,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         if field_kind in ('ListField', 'SetField', 'DictField',):
             subfield = field.item_field
             subkind = subfield.get_internal_type()
-            db_subtype = subfield.db_type()
+            db_subtype = subfield.db_type(connection=self.connection)
 
             if field_kind == 'DictField':
                 if db_type == 'list':
@@ -419,7 +421,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                 try:
                     data[subfield.attname] = self.convert_value_from_db(
                         value[subfield.column], subfield,
-                        subfield.get_internal_type(), subfield.db_type())
+                        subfield.get_internal_type(),
+                        subfield.db_type(connection=self.connection))
                 except KeyError:
                     pass
 

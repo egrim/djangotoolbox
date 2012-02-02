@@ -88,7 +88,7 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         """
         if field.primary_key or field.rel is not None:
             return 'key'
-        return field.db_type()
+        return field.db_type(connection=self.connection)
 
     def sql_create_model(self, model, style, known_models=set()):
         """
