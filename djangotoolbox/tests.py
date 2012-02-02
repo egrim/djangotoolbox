@@ -393,6 +393,18 @@ class EmbeddedModelFieldTest(TestCase):
         self.assertIsInstance(simple.__dict__['some_relation_id'], type(obj.id))
         self.assertIsInstance(simple.some_relation, DictModel)
 
+    @unittest.expectedFailure
+    def test_list_with_embedded_update(self):
+        """See issue #13."""
+        class Parent(models.Model):
+            a_field = models.IntegerField()
+        class Child(models.Model):
+            some_list_field = ListField(EmbeddedModelField(Parent))
+        parent1 = Parent.objects.create(a_field=1)
+        parent2 = Parent.objects.create(a_field=2)
+        child = Child.objects.create(pk=1, some_list_field=[parent1])
+        Child.objects.filter(pk=1).update(some_list_field=[parent2])
+
 
 class SignalTest(TestCase):
     def test_post_save(self):
