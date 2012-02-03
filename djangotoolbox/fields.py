@@ -168,6 +168,13 @@ class SetField(AbstractIterableField):
     def get_internal_type(self):
         return 'SetField'
 
+    def value_to_string(self, obj):
+        """
+        Custom method for serialization, as JSON doesn't support
+        serializing sets.
+        """
+        return list(self._get_val_from_obj(obj))
+
 
 class DictField(AbstractIterableField):
     """

@@ -1,3 +1,4 @@
+from django.core import serializers
 from django.db import connection, models
 from django.db.models import Q
 from django.db.models.signals import post_save
@@ -42,6 +43,7 @@ class OrderedListModel(models.Model):
 
 class SetModel(models.Model):
     setfield = SetField(models.IntegerField())
+
 
 if supports_dicts:
     class DictModel(models.Model):
@@ -423,6 +425,7 @@ class EmbeddedModelFieldTest(TestCase):
         self.assertEqual(parent.embedded_list, [child2])
         self.assertEqual(parent.embedded_dict, {'b': child1})
 
+
 class SignalTest(TestCase):
     def test_post_save(self):
         created = []
@@ -479,6 +482,43 @@ class OrderByTest(TestCase):
         model2 = DBColumn.objects.create(a=2)
         self.assertEqual(list(DBColumn.objects.all().order_by('a').reverse()), [model2, model1])
         self.assertEqual(list(DBColumn.objects.all().order_by('-a').reverse()), [model1, model2])
+
+
+class SerializableSetModel(models.Model):
+    setfield = SetField(models.IntegerField())
+    setcharfield = SetField(models.CharField(), null=True)
+
+class SerializationTest(TestCase):
+    """
+    JSON doesn't support sets, so they need to be converted to lists
+    for serialization; see issue #12.
+    """
+    names = ['foo','bar','baz','monkey']
+
+    def test_json_listfield(self):
+        for i in range(4):
+            ListModel(integer=i+1, names=SerializationTest.names[:i+1],
+                      floating_point=0.0).save()
+        objects = ListModel.objects.all()
+        serialized = serializers.serialize('json', objects)
+        deserialized = serializers.deserialize('json', serialized)
+        for m in deserialized:
+            integer = m.object.integer
+            names = m.object.names
+            self.assertEqual(names, SerializationTest.names[:integer])
+
+    def test_json_setfield(self):
+        for i in range(4):
+            SerializableSetModel(
+                setfield=set([i]),
+                setcharfield=set(SerializationTest.names[:i+1])).save()
+        objects = SerializableSetModel.objects.all()
+        serialized = serializers.serialize('json', objects)
+        deserialized = serializers.deserialize('json', serialized)
+        for m in deserialized:
+            integer = m.object.setfield.pop()
+            names = m.object.setcharfield
+            self.assertEqual(names, set(SerializationTest.names[:integer+1]))
 
 
 class LazyObjectsTest(TestCase):
