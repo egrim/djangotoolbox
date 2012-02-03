@@ -36,7 +36,8 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
     # TODO: Move to core and use to skip unsuitable Django tests.
     supports_primary_key_on = set(NonrelDatabaseCreation.data_types.keys()) - \
         set(('ForeignKey', 'RelatedAutoField', 'OneToOneField', 'ManyToManyField',
-            'RawField', 'BlobField',))
+            'RawField', 'BlobField', 'AbstractIterableField', 'ListField',
+            'SetField', 'DictField', 'EmbeddedModelField'))
 
     # Can a dictionary be saved / fetched from the database.
     # TODO: Remove, unless someone can find a database that really
@@ -230,6 +231,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         :param db_type: Same as field.db_type()
         :param lookup: Is the value being prepared as a filter
                        parameter or for storage
+
+        TODO: Rename to "value_for/from_db"; split parts to
+              "value_for/from_db_model" / collection.
         """
 
         # Back-ends may want to store empty lists or dicts as None.

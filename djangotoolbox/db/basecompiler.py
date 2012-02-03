@@ -27,15 +27,27 @@ EMULATED_OPS = {
 
 class NonrelQuery(object):
     """
-    Base class for nonrel queries. This works on the same level as
-    Django's sql.Query (below compilers).
+    Base class for nonrel queries.
 
-    Provides in-memory filtering and ordering and a framework for
-    converting SQL constraint tree built by Django to a representation
-    more suitable for most NoSQL databases.
+    Compilers build a nonrel query when they want to fetch some data.
+    They work by first allowing sql.compiler.SQLCompiler to partly build
+    a sql.Query, constructing a NonrelQuery query on top of it, and then
+    iterating over its results.
+
+    This class provides in-memory filtering and ordering and a
+    framework for converting SQL constraint tree built by Django to a
+    representation more suitable for most NoSQL databases.
 
     TODO: Replace with FetchCompiler, there are to many query concepts
           around, and it isn't a good abstraction for NoSQL databases.
+
+    TODO: Nonrel currently uses constraint's tree built by Django to
+          handle filtering. However, Django intermingles translating
+          its lookup syntax abstraction to a logical formula with some
+          preprocessing for joins, and this results in multiple hacks
+          in nonrel. It would be a nice (though likely sizable) project
+          to build some abstraction that would be suitable for both
+          contexts.
     """
 
     # ----------------------------------------------
