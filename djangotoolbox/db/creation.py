@@ -65,8 +65,9 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
     def nonrel_db_type(self, field):
         """
         Returns "key" for all primary key and foreign key fields
-        independent of the field's own logic, for non key fields
-        uses the original Django's db_type logic.
+        independent of the field's own logic, for non key fields uses
+        the original Django's db_type logic. This should be used
+        instead of Field.db_type.
 
         Note: we can't simply redefine db_type here because we may want
         to override db_type a field may return directly.

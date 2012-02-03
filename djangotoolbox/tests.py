@@ -395,7 +395,6 @@ class EmbeddedModelFieldTest(TestCase):
         self.assertIsInstance(simple.__dict__['some_relation_id'], type(obj.id))
         self.assertIsInstance(simple.some_relation, DictModel)
 
-    @unittest.expectedFailure
     def test_update(self):
         """
         Test that update can be used on an a subset of objects
@@ -407,8 +406,8 @@ class EmbeddedModelFieldTest(TestCase):
             pass
         class Parent(models.Model):
             id = models.IntegerField(primary_key=True)
-            integer_list = ListField(IntegerField)
-            integer_dict = DictField(IntegerField)
+            integer_list = ListField(models.IntegerField)
+            integer_dict = DictField(models.IntegerField)
             embedded_list = ListField(EmbeddedModelField(Child))
             embedded_dict = DictField(EmbeddedModelField(Child))
         child1 = Child.objects.create()
@@ -492,6 +491,8 @@ class SerializationTest(TestCase):
     """
     JSON doesn't support sets, so they need to be converted to lists
     for serialization; see issue #12.
+
+    TODO: Check if the fix works with embedded models / nested sets.
     """
     names = ['foo','bar','baz','monkey']
 

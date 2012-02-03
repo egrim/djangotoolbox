@@ -274,37 +274,42 @@ class EmbeddedModelField(models.Field):
 
     model = property(lambda self: self._model, _set_model)
 
-    def pre_save(self, model_instance, _):
+    def get_db_prep_save(self, embedded_instance, **kwargs):
         """
-        Passes a tuple with embedded_instance, field => value mapping
-        and decision on saving model info down to convert_value_for_db.
-        Also applies pre_save of embedded instance fields.
+        Applies pre_save and get_db_prep_save of embedded instance
+        fields and passes a tuple with the embedded_instance, a
+        field => value mapping and decision on saving model info down
+        to database type conversions.
 
         The embedded instance will be saved as a column => value dict
         in the end (possibly augmented with info about instance's model
-        for untyped embedding), but because we need to know fields of
-        subvalues in base conversion routines, we need to entrust them
-        with creating and augmenting the dict.
+        for untyped embedding), but because we need to apply database
+        type conversions on embedded instance fields' values and for
+        these we need to know fields those values come from, we need to
+        entrust the database layer with creating and augmenting the
+        dict.
         """
-        embedded_instance = getattr(model_instance, self.attname)
         if embedded_instance is None:
             return None
 
-        # Field's value should be an instance of the model given in its
-        # declaration or at least of some model.
+        # The field's value should be an instance of the model given in
+        # its declaration or at least of some model.
         model = self.embedded_model or models.Model
         if not isinstance(embedded_instance, model):
             raise TypeError('Expected instance of type %r, not %r'
                             % (model, type(embedded_instance)))
 
-        # Apply pre_save of embedded instance fields, create the
-        # field => value mapping to be passed to storage preprocessing.
+        # Apply pre_save and get_db_prep_save of embedded instance
+        # fields, create the field => value mapping to be passed to
+        # storage preprocessing.
         field_values = {}
         add = not embedded_instance._entity_exists
         for field in embedded_instance._meta.fields:
-            value = field.pre_save(embedded_instance, add)
+            value = field.get_db_prep_save(
+                field.pre_save(embedded_instance, add), **kwargs)
 
-            # Exclude unset primary keys (e.g. {"id" : None}). TODO: Why?
+            # Exclude unset primary keys (e.g. {"id" : None}).
+            # TODO: Why?
             if field.primary_key and value is None:
                 continue
 
@@ -318,19 +323,6 @@ class EmbeddedModelField(models.Field):
         # This instance will exist in the database soon.
         # TODO: Ensure that this doesn't cause race conditions.
         embedded_instance._entity_exists = True
-
-        return embedded_instance, field_values, save_model_info
-
-    def get_db_prep_value(self, value, **kwargs):
-        """
-        Lets embedded model's fields prepare their values.
-        """
-        if value is None:
-            return None
-
-        embedded_instance, field_values, save_model_info = value
-        for field, value in field_values.iteritems():
-            field_values[field] = field.get_db_prep_value(value, **kwargs)
 
         return embedded_instance, field_values, save_model_info
 
