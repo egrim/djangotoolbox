@@ -67,7 +67,9 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     -- some conversions need more info about the field or model the
        value comes from (e.g. key conversions, embedded deconversion);
     -- there are no value_to_db_* methods for some value types (bools);
-    -- we need to handle nonrel specific fields (collections, blobs).
+    -- we need to handle collecion fields (list, set, dict) and they
+       need to differentiate between deconverting from database and
+       deserializing (so to_python is not enough).
 
     Prefer standard methods when the conversion is specific to a
     field kind and the added value_for/from_db methods when you
@@ -287,8 +289,11 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         We base the conversion on field class / kind and assume some
         knowledge about field internals (that the field has an
         "item_field" property that gives the right subfield for any of
-        its values), because a framework for dynamic determination of
-        parameters for items' conversions turned out to be too heavy.
+        its values), to avoid adding a framework for determination of
+        parameters for items' conversions; we do the conversion here
+        rather than inside get_db_prep_save/lookup for symetry with
+        deconversion (which can't be in to_python because the method is
+        also used for deserialization).
 
         Note that collection lookup values are plain values rather than
         lists, sets or dicts, but they still should be converted as a
