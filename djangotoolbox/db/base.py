@@ -70,7 +70,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     -- we need to handle nonrel specific fields (collections, blobs).
 
     Prefer standard methods when the conversion is specific to a
-    field kind and the added convert_value_for/from_db methods when you
+    field kind and the added value_for/from_db methods when you
     can convert any value of a "type".
 
     Please note, that after changes to type conversions, data saved
@@ -176,29 +176,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             raise NotImplementedError('This database does not support %r '
                                       'aggregates' % type(aggregate))
 
-    def encode_for_db_key(self, value, field_kind):
-        """
-        Converts value to be used as a key to an acceptable type.
-        On default we do no encoding, only allowing key values directly
-        acceptable by the back-end.
-
-        The conversion has to be reversible given the field type,
-        encoding should preserve comparisons.
-
-        Use this to expand the set of fields that can be used as
-        primary keys, return value sutiable for a key rather than
-        a key itself.
-        """
-        raise DatabaseError(
-            '{0} may not be used as primary key field'.format(field_kind))
-
-    def decode_from_db_key(self, value, field_kind):
-        """
-        Decodes value previously encoded for a key.
-        """
-        return value
-
-    def convert_value_for_db(self, value, field, field_kind, db_type, lookup):
+    def value_for_db(self, value, field, field_kind, db_type, lookup):
         """
         Converts a standard Python value to a type that can be stored
         or processed by the database driver.
@@ -270,8 +248,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             # a collection item (assuming all items or values are
             # converted in the same way).
             if lookup:
-                value = self.convert_value_for_db(value, subfield, subkind,
-                                                  db_subtype, lookup)
+                value = self.value_for_db(value, subfield,
+                                          subkind, db_subtype, lookup)
 
             # Create a generator yielding processed items or pairs with
             # processed subvalues, use it to produce a collection of
@@ -280,9 +258,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             else:
                 if field_kind == 'DictField':
                     value = (
-                        (key, self.convert_value_for_db(subvalue, subfield,
-                                                        subkind, db_subtype,
-                                                        lookup))
+                        (key, self.value_for_db(subvalue, subfield,
+                                                subkind, db_subtype, lookup))
                         for key, subvalue in value.iteritems())
 
                     # Allow a dict or a flat list with keys and values
@@ -295,8 +272,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
                 else:
                     value = (
-                        self.convert_value_for_db(subvalue, subfield, subkind,
-                                                  db_subtype, lookup)
+                        self.value_for_db(subvalue, subfield,
+                                          subkind, db_subtype, lookup)
                         for subvalue in value)
 
                     # Cast to the type requested by the back-end.
@@ -324,11 +301,11 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             # from fields to columns.
             value = (
                 (subfield.column,
-                 self.convert_value_for_db(subvalue, subfield,
-                                           subfield.get_internal_type(),
-                                           subfield.db_type(
-                                               connection=self.connection),
-                                           lookup))
+                 self.value_for_db(subvalue, subfield,
+                                   subfield.get_internal_type(),
+                                   subfield.db_type(
+                                       connection=self.connection),
+                                   lookup))
                 for subfield, subvalue in field_values.iteritems())
 
             # Embedded instance fields used not to be converted.
@@ -351,7 +328,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
         return value
 
-    def convert_value_from_db(self, value, field, field_kind, db_type):
+    def value_from_db(self, value, field, field_kind, db_type):
         """
         Converts a database type to a type acceptable by the field.
 
@@ -390,13 +367,13 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                     value = value.iteritems()
 
                 value = dict(
-                    (key, self.convert_value_from_db(subvalue, subfield,
-                                                     subkind, db_subtype))
+                    (key, self.value_from_db(subvalue, subfield,
+                                             subkind, db_subtype))
                     for key, subvalue in value)
             else:
                 value = (
-                    self.convert_value_from_db(subvalue, subfield,
-                                               subkind, db_subtype)
+                    self.value_from_db(subvalue, subfield,
+                                       subkind, db_subtype)
                     for subvalue in value)
 
                 if field_kind == 'ListField':
@@ -442,7 +419,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             data = {}
             for subfield in model._meta.fields:
                 try:
-                    data[subfield.attname] = self.convert_value_from_db(
+                    data[subfield.attname] = self.value_from_db(
                         value[subfield.column], subfield,
                         subfield.get_internal_type(),
                         subfield.db_type(connection=self.connection))
@@ -455,6 +432,28 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             # know that the object already exists in the database.
             value = model(__entity_exists=True, **data)
 
+        return value
+
+    def value_for_db_key(self, value, field_kind):
+        """
+        Converts value to be used as a key to an acceptable type.
+        On default we do no encoding, only allowing key values directly
+        acceptable by the back-end.
+
+        The conversion has to be reversible given the field type,
+        encoding should preserve comparisons.
+
+        Use this to expand the set of fields that can be used as
+        primary keys, return value suitable for a key rather than
+        a key itself.
+        """
+        raise DatabaseError(
+            '{0} may not be used as primary key field'.format(field_kind))
+
+    def value_from_db_key(self, value, field_kind):
+        """
+        Decodes value previously encoded for a key.
+        """
         return value
 
 

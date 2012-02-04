@@ -310,8 +310,9 @@ class NonrelCompiler(SQLCompiler):
 
     def __init__(self, query, connection, using):
         """
-        Save pointers to DatabaseCreation and DatabaseOperations for
-        quick access in conversion wrappers.
+        Initializes SQLComplier for the given query and connection and
+        saves references to connections's DatabaseCreation/Operations
+        for quick access in conversion wrappers.
         """
         super(NonrelCompiler, self).__init__(query, connection, using)
         self.creation = self.connection.creation
@@ -361,9 +362,9 @@ class NonrelCompiler(SQLCompiler):
         """
         Decodes values for the given fields from the database entity.
 
-        The entity is assumed to be a Mapping using field database column
-        names as keys. Decodes values using convert_value_from_db as
-        well as the standard convert_values.
+        The entity is assumed to be a dict using field database column
+        names as keys. Decodes values using value_from_db as well as
+        the standard convert_values.
         """
         result = []
         for field in fields:
@@ -371,7 +372,7 @@ class NonrelCompiler(SQLCompiler):
             if value is NOT_PROVIDED:
                 value = field.get_default()
             else:
-                value = self.convert_value_from_db(value, field)
+                value = self.value_from_db(value, field)
                 value = self.query.convert_values(value, field, self.connection)
             if value is None and not field.null:
                 raise IntegrityError("Non-nullable field %s can't be None!"
@@ -470,7 +471,7 @@ class NonrelCompiler(SQLCompiler):
                 descending = not descending
             yield (opts.get_field(field).column, descending)
 
-    def convert_value_for_db(self, value, field, lookup=False):
+    def value_for_db(self, value, field, lookup=False):
         """
         Does type-conversions needed before storing a value in the
         the database or using it as a filter parameter.
@@ -489,18 +490,18 @@ class NonrelCompiler(SQLCompiler):
         :param lookup: Is the value being prepared as a filter
                        parameter or for storage
         """
-        return self.ops.convert_value_for_db(value, field,
+        return self.ops.value_for_db(value, field,
             field.get_internal_type(),
             self.creation.nonrel_db_type(field), lookup)
 
-    def convert_value_from_db(self, value, field):
+    def value_from_db(self, value, field):
         """
         Performs deconversions defined by back-end's DatabaseOperations.
 
         :param value: A value received from the database client
         :param field: A field the value is meant for
         """
-        return self.ops.convert_value_from_db(value, field,
+        return self.ops.value_from_db(value, field,
             field.get_internal_type(),
             self.creation.nonrel_db_type(field))
 
@@ -518,7 +519,7 @@ class NonrelInsertCompiler(NonrelCompiler):
                 if not field.null and value is None:
                     raise IntegrityError("You can't set %s (a non-nullable "
                                          "field) to None!" % field.name)
-                value = self.convert_value_for_db(value, field)
+                value = self.value_for_db(value, field)
             data[column] = value
         return self.insert(data, return_id=return_id)
 
@@ -538,7 +539,7 @@ class NonrelUpdateCompiler(NonrelCompiler):
                 value = value.prepare_database_save(field)
             else:
                 value = field.get_db_prep_save(value, connection=self.connection)
-            value = self.convert_value_for_db(value, field)
+            value = self.value_for_db(value, field)
             values.append((field, value))
         return self.update(values)
 
