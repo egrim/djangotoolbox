@@ -63,7 +63,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     but there are some problems with them:
     -- some preparations need to be done for all values or for values
        of a particular "kind" (e.g. lazy objects evaluation or casting
-       strings to standard types);
+       strings wrappers to standard types);
     -- some conversions need more info about the field or model the
        value comes from (e.g. key conversions, embedded deconversion);
     -- there are no value_to_db_* methods for some value types (bools);
@@ -310,12 +310,12 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         """
         subfield = field.item_field
         subkind = subfield.get_internal_type()
-        db_subtype = subfield.db_type(connection=self.connection)
+        db_subtype = self.connection.creation.nonrel_db_type(subfield)
 
         # Do convert filter parameters.
         if lookup:
             value = self.value_for_db(value, subfield,
-                                     subkind, db_subtype, lookup)
+                                      subkind, db_subtype, lookup)
 
         # Convert list/set items or dict values.
         else:
@@ -362,7 +362,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         """
         subfield = field.item_field
         subkind = subfield.get_internal_type()
-        db_subtype = subfield.db_type(connection=self.connection)
+        db_subtype = self.connection.creation.nonrel_db_type(subfield)
 
         if field_kind == 'DictField':
 
@@ -433,8 +433,8 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             (subfield.column,
              self.value_for_db(subvalue, subfield,
                                subfield.get_internal_type(),
-                               subfield.db_type(
-                                   connection=self.connection),
+                               self.connection.creation.nonrel_db_type(
+                                   subfield),
                                lookup))
             for subfield, subvalue in field_values.iteritems())
 
@@ -511,7 +511,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                 data[subfield.attname] = self.value_from_db(
                     value[subfield.column], subfield,
                     subfield.get_internal_type(),
-                    subfield.db_type(connection=self.connection))
+                    self.connection.creation.nonrel_db_type(subfield))
             except KeyError:
                 pass
 
