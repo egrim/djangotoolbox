@@ -5,7 +5,6 @@ from django.db.backends import BaseDatabaseFeatures, BaseDatabaseOperations, \
     BaseDatabaseIntrospection
 from django.db.utils import DatabaseError
 from django.utils.functional import Promise
-from django.utils.importlib import import_module
 from django.utils.safestring import EscapeString, EscapeUnicode, SafeString, \
     SafeUnicode
 
@@ -286,19 +285,19 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         """
         Recursively converts values from AbstractIterableFields.
 
-        We base the conversion on field class / kind and assume some
-        knowledge about field internals (that the field has an
-        "item_field" property that gives the right subfield for any of
-        its values), to avoid adding a framework for determination of
-        parameters for items' conversions; we do the conversion here
-        rather than inside get_db_prep_save/lookup for symetry with
-        deconversion (which can't be in to_python because the method is
-        also used for deserialization).
-
         Note that collection lookup values are plain values rather than
         lists, sets or dicts, but they still should be converted as a
         collection item (assuming all items or values are converted in
         the same way).
+
+        We base the conversion on field class / kind and assume some
+        knowledge about field internals (e.g. that the field has an
+        "item_field" property that gives the right subfield for any of
+        its values), to avoid adding a framework for determination of
+        parameters for items' conversions; we do the conversion here
+        rather than inside get_db_prep_save/lookup for symmetry with
+        deconversion (which can't be in to_python because the method is
+        also used for data not coming from the database).
 
         Returns a list, set or dict according to the db_type given. If
         the "list" db_type used for DictField, a list with keys and
@@ -397,8 +396,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
     def value_for_db_model(self, value, field, field_kind, db_type, lookup):
         """
-        Converts a tuple of (embedded_instance, field => value mapping,
-        and info whether or not to save model info) received from an
+        Converts a field => value mapping received from an
         EmbeddedModelField to a dict or list for storage.
 
         The embedded instance fields' values are also converted /
@@ -407,7 +405,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         This is the right thing to do, but was not done in the past, so
         if you somehow ended relying on subfield conversions not being
         made change EmbeddedModelFields to LegacyEmbeddedModelFields to
-        avoid them (it should not be necessary unless you have lookups
+        avoid them (it should not be necessary, unless you have lookups
         on EmbeddedModelFields or do some low-level processing using
         values held by their fields).
 
@@ -425,8 +423,6 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             # raise NotImplementedError('Needs specification')
             return value
 
-        embedded_instance, field_values, save_model_info = value
-
         # Convert using proper instance field's info, change keys from
         # fields to columns.
         value = (
@@ -436,17 +432,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                                self.connection.creation.nonrel_db_type(
                                    subfield),
                                lookup))
-            for subfield, subvalue in field_values.iteritems())
-
-        # Embedded instance fields used not to be converted.
-        if field.__class__.__name__ == 'LegacyEmbeddedModelField':
-            value = ((f.column, v) for f, v in field_values.iteritems())
-
-        # For untyped embedding save model info alongside field values.
-        if save_model_info:
-            value = list(value) + [
-                ('_module', embedded_instance.__class__.__module__),
-                ('_model', embedded_instance.__class__.__name__)]
+            for subfield, subvalue in value.iteritems())
 
         # Process "dict" or "list" (with columns and their values
         # interleaved) storage types, or return a generator.
@@ -459,65 +445,31 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
 
     def value_from_db_model(self, value, field, field_kind, db_type):
         """
-        Reinstatiates a serialized model.
+        Deconverts values stored for embedded model fields.
 
         Embedded instances are stored as a (column, value) pairs in a
-        dict or single-flattened list; possibly augmented with model
-        class info.
+        dict or single-flattened list.
 
-        Also handles "old" LegacyEmbeddedModelField, supporting data
-        from pre-0.2 Mongo engine.
-
-        Creates and returns a model instance, so the field doesn't have
-        to use the SubfieldBase metaclass.
+        Returns a tuple with model class and field.attname => value
+        mapping.
         """
 
-        # List storage -- separate and create a dict.
+        # List storage, separate keys from values and create a dict.
         if db_type == 'list':
             value = dict(zip(value[::2], value[1::2]))
 
-        # Compatibility with old LegacyEmbeddedModelField (model info
-        # used to be serialized differently before 0.2).
-        # TODO: Maybe its OK to remove this already?
-        if field.__class__.__name__ == 'LegacyEmbeddedModelField':
-            value.pop('_app', None)
-            if '_module' not in value:
-                value.pop('_model', None)
-            if '_id' in value:
-                value['id'] = value.pop('_id')
+        # Let untyped fields determine what model.
+        embedded_model = field.model_for_data(value)
 
-        # We either use the model stored alongside values (untyped
-        # embedding) or the one from the field (typed embedding).
-        # Try the stored values first to support fixing type.
-        module = value.pop('_module', None)
-        model = value.pop('_model', None)
-        if module is not None and model is not None:
-            model = getattr(import_module(module), model)
-        else:
-            model = field.embedded_model
-
-        # Embedded instance fields used not to be deconverted.
-        if field.__class__.__name__ == 'LegacyEmbeddedModelField':
-            return model(__entity_exists=True, **dict(
-                (f.attname, value[f.column]) for f in model._meta.fields
-                if (f.column in value)))
-
-        # Deconvert field values and prepare a dict that can be used to
-        # initialize a model. Leave fields for which no value is stored
-        # uninitialized.
-        data = {}
-        for subfield in model._meta.fields:
-            try:
-                data[subfield.attname] = self.value_from_db(
-                    value[subfield.column], subfield,
-                    subfield.get_internal_type(),
-                    self.connection.creation.nonrel_db_type(subfield))
-            except KeyError:
-                pass
-
-        # Note: the double underline is not a typo -- this lets the
-        # field know that the object already exists in the database.
-        return model(__entity_exists=True, **data)
+        # Deconvert fields' values and prepare a dict that can be used
+        # to initialize a model (by changing keys from columns to
+        # attribute names).
+        return embedded_model, dict(
+            (subfield.attname, self.value_from_db(
+                value[subfield.column], subfield, subfield.get_internal_type(),
+                self.connection.creation.nonrel_db_type(subfield)))
+            for subfield in embedded_model._meta.fields
+            if subfield.column in value)
 
     def value_for_db_key(self, value, field_kind):
         """

@@ -47,19 +47,25 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'URLField':                   'string',
         'XMLField':                   'string',
 
-        # Mappings for fields provided by nonrel. You may use "list"
-        # for SetFields, or even DictField and EmbeddedModelField (if
-        # your database supports nested lists), but note that the same
-        # set or dict may be represented by different lists (with
-        # elements in different order), so order of such data is
-        # undetermined.
-        'RawField':                   'raw',
-        'BlobField':                  'bytes',
+        # You may use "list" for SetFields, or even DictField and
+        # EmbeddedModelField (if your database supports nested lists),
+        # but note that the same set or dict may be represented by
+        # different lists (with elements in different order), so order
+        # of such data is undetermined.
         'AbstractIterableField':      'list',
         'ListField':                  'list',
         'SetField':                   'set',
         'DictField':                  'dict',
         'EmbeddedModelField':         'dict',
+
+        # RawFields ("raw" db_type) are used when type is not known
+        # (untyped collections) or for values that do not come from
+        # a field at all (model info serialization), only do generic
+        # processing for them (if any). On the other hand, anything
+        # using the "bytes" db_type should be converted to a database
+        # blob type or stored as binary data.
+        'RawField':                   'raw',
+        'BlobField':                  'bytes',
     }
 
     def nonrel_db_type(self, field):
