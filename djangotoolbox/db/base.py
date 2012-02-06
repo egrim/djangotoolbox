@@ -39,11 +39,6 @@ class NonrelDatabaseFeatures(BaseDatabaseFeatures):
             'RawField', 'BlobField', 'AbstractIterableField', 'ListField',
             'SetField', 'DictField', 'EmbeddedModelField'))
 
-    # Can a dictionary be saved / fetched from the database.
-    # TODO: Remove, unless someone can find a database that really
-    #       can't handle dicts (using serialization or nested lists).
-    supports_dicts = False
-
     def _supports_transactions(self):
         return False
 

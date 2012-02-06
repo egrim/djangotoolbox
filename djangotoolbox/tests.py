@@ -18,10 +18,6 @@ def count_calls(func):
     return wrapper
 
 
-# We will skip some tests if the database can't store dicts.
-supports_dicts = getattr(connection.features, 'supports_dicts', False)
-
-
 class Target(models.Model):
     index = models.IntegerField()
 
@@ -44,12 +40,26 @@ class OrderedListModel(models.Model):
 class SetModel(models.Model):
     setfield = SetField(models.IntegerField())
 
+class DictModel(models.Model):
+    dictfield = DictField(models.IntegerField)
+    dictfield_nullable = DictField(null=True)
+    auto_now = DictField(models.DateTimeField(auto_now=True))
 
-if supports_dicts:
-    class DictModel(models.Model):
-        dictfield = DictField(models.IntegerField)
-        dictfield_nullable = DictField(null=True)
-        auto_now = DictField(models.DateTimeField(auto_now=True))
+class EmbeddedModelFieldModel(models.Model):
+    simple = EmbeddedModelField('EmbeddedModel', null=True)
+    simple_untyped = EmbeddedModelField(null=True)
+    typed_list = ListField(EmbeddedModelField('SetModel'))
+    typed_list2 = ListField(EmbeddedModelField('EmbeddedModel'))
+    untyped_list = ListField(EmbeddedModelField())
+    untyped_dict = DictField(EmbeddedModelField())
+    ordered_list = ListField(EmbeddedModelField(), ordering=lambda obj: obj.index)
+
+class EmbeddedModel(models.Model):
+    some_relation = models.ForeignKey(DictModel, null=True)
+    someint = models.IntegerField(db_column='custom')
+    auto_now = models.DateTimeField(auto_now=True)
+    auto_now_add = models.DateTimeField(auto_now_add=True)
+
 
 class IterableFieldsTest(TestCase):
     floats = [5.3, 2.6, 9.1, 1.58]
@@ -178,7 +188,6 @@ class IterableFieldsTest(TestCase):
         # an empty list
         SetModel().save()
 
-    @skipUnlessDBFeature('supports_dicts')
     def test_dictfield(self):
         DictModel(dictfield=dict(a=1, b='55', foo=3.14),
                   auto_now={'a' : None}).save()
@@ -225,45 +234,6 @@ class IterableFieldsTest(TestCase):
         UntypedListModel.objects.create(untyped_list=[1, [2, 3]])
 
 
-class BaseModel(models.Model):
-    pass
-
-class ExtendedModel(BaseModel):
-    name = models.CharField(max_length=20)
-
-class BaseModelProxy(BaseModel):
-    class Meta:
-        proxy = True
-
-class ExtendedModelProxy(ExtendedModel):
-    class Meta:
-        proxy = True
-
-class ProxyTest(TestCase):
-    def test_proxy(self):
-        list(BaseModelProxy.objects.all())
-
-    def test_proxy_with_inheritance(self):
-        self.assertRaises(DatabaseError, lambda: list(ExtendedModelProxy.objects.all()))
-
-
-if supports_dicts:
-    class EmbeddedModelFieldModel(models.Model):
-        simple = EmbeddedModelField('EmbeddedModel', null=True)
-        simple_untyped = EmbeddedModelField(null=True)
-        typed_list = ListField(EmbeddedModelField('SetModel'))
-        typed_list2 = ListField(EmbeddedModelField('EmbeddedModel'))
-        untyped_list = ListField(EmbeddedModelField())
-        untyped_dict = DictField(EmbeddedModelField())
-        ordered_list = ListField(EmbeddedModelField(), ordering=lambda obj: obj.index)
-
-    class EmbeddedModel(models.Model):
-        some_relation = models.ForeignKey(DictModel, null=True)
-        someint = models.IntegerField(db_column='custom')
-        auto_now = models.DateTimeField(auto_now=True)
-        auto_now_add = models.DateTimeField(auto_now_add=True)
-
-@skipUnlessDBFeature('supports_dicts')
 class EmbeddedModelFieldTest(TestCase):
     def assertEqualDatetime(self, d1, d2):
         """Compares d1 and d2, ignoring microseconds."""
@@ -423,6 +393,28 @@ class EmbeddedModelFieldTest(TestCase):
         self.assertEqual(parent.integer_dict, {'b': 3})
         self.assertEqual(parent.embedded_list, [child2])
         self.assertEqual(parent.embedded_dict, {'b': child1})
+
+
+class BaseModel(models.Model):
+    pass
+
+class ExtendedModel(BaseModel):
+    name = models.CharField(max_length=20)
+
+class BaseModelProxy(BaseModel):
+    class Meta:
+        proxy = True
+
+class ExtendedModelProxy(ExtendedModel):
+    class Meta:
+        proxy = True
+
+class ProxyTest(TestCase):
+    def test_proxy(self):
+        list(BaseModelProxy.objects.all())
+
+    def test_proxy_with_inheritance(self):
+        self.assertRaises(DatabaseError, lambda: list(ExtendedModelProxy.objects.all()))
 
 
 class SignalTest(TestCase):
