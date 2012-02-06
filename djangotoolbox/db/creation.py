@@ -90,9 +90,11 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
               -- and contrib/gis (defines its own geo_db_type method).
 
         TODO: related_db_type and related changes are now only needed
-              for "legacy" storage methods. At some point also remove
-              all instances of "RelatedAutoField".
+              for "legacy" storage methods (which is no longer a must
+              too any longer). At some point also remove all instances
+              of "RelatedAutoField".
         """
+        print 'ndbt', field.model 
         if field.primary_key or field.rel is not None:
             return 'key'
         return field.db_type(connection=self.connection)

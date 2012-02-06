@@ -419,32 +419,16 @@ class LegacyEmbeddedModelField(EmbeddedModelField):
     through back-end database type conversion / deconversion (e.g. key
     value -> ObjectId).
     """
-
-    def get_db_prep_save(self, embedded_instance, **kwargs):
-        """
-        Lets embedded fields' values be converted like they did not come
-        from a field (the field used to use db_subtype of RawFields).
-        """
-        field_values = super(LegacyEmbeddedModelField, self).get_db_prep_save(
-            embedded_instance, **kwargs)
-
-        fake_field_values = {}
-        for field, value in field_values.iteritems():
-            fake_field = RawField()
-            fake_field.set_attributes_from_name(field.attname)
-            fake_field_values[fake_field] = value
-
-        return fake_field_values
-
-    def import_model(self, data):
+    def model_for_data(self, data):
         """
         Removes legacy model info from data.
+
+        TODO: Maybe its OK to remove this already?
         """
-        # TODO: Maybe its OK to remove this already?
         data.pop('_app', None)
         if '_module' not in data:
             data.pop('_model', None)
         if '_id' in data:
             data['id'] = data.pop('_id')
 
-        return super(LegacyEmbeddedModelField, self).import_model(data)
+        return super(LegacyEmbeddedModelField, self).model_for_data(data)

@@ -89,6 +89,8 @@ class NonrelQuery(object):
 
         TODO: Rename, this methods deals with constraints rather than
               what Django calls lookups.
+        TODO: Column argument should no longer be needed; at least put
+              it after field.
         """
         raise NotImplementedError('Not implemented')
 
@@ -518,6 +520,7 @@ class NonrelInsertCompiler(NonrelCompiler):
     """
     def execute_sql(self, return_id=False):
         data = dict()
+        pk = self.query.get_meta().pk
         for (field, value), column in zip(self.query.values, self.query.columns):
 
             # Raise an exception for non-nullable fields without a value.
@@ -529,7 +532,7 @@ class NonrelInsertCompiler(NonrelCompiler):
             # Use the primary key field when our sql.Query provides a
             # value without a field.
             if field is None:
-                field = self.query.get_meta().pk
+                field = pk
             assert field.column == column
             assert field not in data
 
@@ -541,12 +544,8 @@ class NonrelInsertCompiler(NonrelCompiler):
 
         # Pass the key value through normal database deconversion.
         key = self.insert(data, return_id=return_id)
-        key_field = self.query.get_meta().pk
-        return self.ops.convert_values(
-            self.ops.value_from_db(key, key_field,
-                                   key_field.get_internal_type(),
-                                   self.creation.nonrel_db_type(key_field)),
-            key_field)
+        return self.ops.convert_values(self.ops.value_from_db(key, pk,
+            pk.get_internal_type(), self.creation.nonrel_db_type(pk)), pk)
 
     def insert(self, values, return_id):
         """
@@ -556,8 +555,11 @@ class NonrelInsertCompiler(NonrelCompiler):
         deconversions that every value coming from the database does
         (convert_values and value_from_db).
 
-        :param values: The model object as a list of (field, value) pairs
-        :param return_id: Whether to return the id of the newly created entity
+        :param values: The model object as a list of (field, value)
+                       pairs; each value is already prepared for the
+                       database
+        :param return_id: Whether to return the id or key of the newly
+                          created entity
         """
         raise NotImplementedError
 
@@ -576,6 +578,8 @@ class NonrelUpdateCompiler(NonrelCompiler):
 
     def update(self, values):
         """
+        Changes an entity that already exists in the database.
+
         :param values: A list of (field, new-value) pairs
         """
         raise NotImplementedError
