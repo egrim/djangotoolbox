@@ -517,26 +517,46 @@ class NonrelInsertCompiler(NonrelCompiler):
           below ever fails).
     """
     def execute_sql(self, return_id=False):
-
-        # Raise an exception for non-nullable fields without a value
-        # and use the PK field when our sql.Query provides a value
-        # without a field.
-        data = self.query.values
+        data = dict()
         for (field, value), column in zip(self.query.values, self.query.columns):
+
+            # Raise an exception for non-nullable fields without a value.
             if field is not None:
                 if not field.null and value is None:
                     raise IntegrityError("You can't set %s (a non-nullable "
                                          "field) to None!" % field.name)
+
+            # Use the primary key field when our sql.Query provides a
+            # value without a field.
             if field is None:
                 field = self.query.get_meta().pk
             assert field.column == column
+            assert field not in data
+
+            # Prepare values for database, note that query.values have
+            # already passed through get_db_prep_save.
+            value = self.value_for_db(value, field)
+
             data[field] = value
 
-        return self.insert(data, return_id=return_id)
+        # Pass the key value through normal database deconversion.
+        key = self.insert(data, return_id=return_id)
+        key_field = self.query.get_meta().pk
+        return self.ops.convert_values(
+            self.ops.value_from_db(key, key_field,
+                                   key_field.get_internal_type(),
+                                   self.creation.nonrel_db_type(key_field)),
+            key_field)
 
     def insert(self, values, return_id):
         """
-        :param values: The model object as a list of (column, value) pairs
+        Creates a new entity to represent a model.
+
+        Note that the returned key will go through the same database
+        deconversions that every value coming from the database does
+        (convert_values and value_from_db).
+
+        :param values: The model object as a list of (field, value) pairs
         :param return_id: Whether to return the id of the newly created entity
         """
         raise NotImplementedError
