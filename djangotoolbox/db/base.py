@@ -66,9 +66,11 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
     -- some conversions need more info about the field or model the
        value comes from (e.g. key conversions, embedded deconversion);
     -- there are no value_to_db_* methods for some value types (bools);
-    -- we need to handle collecion fields (list, set, dict) and they
+    -- we need to handle collecion fields (list, set, dict): they
        need to differentiate between deconverting from database and
-       deserializing (so to_python is not enough).
+       deserializing (so single to_python is inconvenient) and need to
+       do some recursion, so a single value_for_db is better than one
+       method for each field kind.
 
     Prefer standard methods when the conversion is specific to a
     field kind and the added value_for/from_db methods when you

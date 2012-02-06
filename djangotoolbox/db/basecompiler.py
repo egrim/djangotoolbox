@@ -511,16 +511,27 @@ class NonrelInsertCompiler(NonrelCompiler):
     Base class for all compliers that create new entities or objects
     in the database. It has to define execute_sql method due to being
     used in place of a SQLInsertCompiler.
+
+    TODO: Analyze if it's always true that when field is None we should
+          use the PK from self.query (check if the column assertion
+          below ever fails).
     """
     def execute_sql(self, return_id=False):
-        data = {}
+
+        # Raise an exception for non-nullable fields without a value
+        # and use the PK field when our sql.Query provides a value
+        # without a field.
+        data = self.query.values
         for (field, value), column in zip(self.query.values, self.query.columns):
             if field is not None:
                 if not field.null and value is None:
                     raise IntegrityError("You can't set %s (a non-nullable "
                                          "field) to None!" % field.name)
-                value = self.value_for_db(value, field)
-            data[column] = value
+            if field is None:
+                field = self.query.get_meta().pk
+            assert field.column == column
+            data[field] = value
+
         return self.insert(data, return_id=return_id)
 
     def insert(self, values, return_id):
