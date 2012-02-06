@@ -524,7 +524,7 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         a key itself.
         """
         raise DatabaseError(
-            '{0} may not be used as primary key field'.format(field_kind))
+            '%s may not be used as primary key field' % field_kind)
 
     def value_from_db_key(self, value, field_kind):
         """

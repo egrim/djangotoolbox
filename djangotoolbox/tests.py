@@ -1,3 +1,5 @@
+from __future__ import with_statement
+
 from django.core import serializers
 from django.db import connection, models
 from django.db.models import Q
