@@ -1,3 +1,4 @@
+import cPickle as pickle
 import datetime
 
 from django.db.backends import BaseDatabaseFeatures, BaseDatabaseOperations, \
@@ -301,13 +302,16 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         deconversion (which can't be in to_python because the method is
         also used for data not coming from the database).
 
-        Returns a list, set or dict according to the db_type given. If
-        the "list" db_type used for DictField, a list with keys and
+        Returns a list, set, dict, string or bytes according to the
+        db_type given.
+        If the "list" db_type used for DictField, a list with keys and
         values interleaved will be returned (list of pairs is not good,
         because lists / tuples may need conversion themselves; the list
-        may still be nested for dicts containing collections). If an
-        unknown db_type is specified, returns a generator yielding
-        converted elements / pairs with converted values.
+        may still be nested for dicts containing collections).
+        The "string" and "bytes" db_types use serialization with pickle
+        protocol 0 or 2 respectively.
+        If an unknown db_type is specified, returns a generator
+        yielding converted elements / pairs with converted values.
         """
         subfield = field.item_field
         subkind = subfield.get_internal_type()
@@ -328,11 +332,11 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                                             subkind, db_subtype, lookup))
                     for key, subvalue in value.iteritems())
 
-                # Return just a dict, a flattened list, or a generator.
+                # Return just a dict, a once-flattened list;
                 if db_type == 'dict':
-                    value = dict(value)
+                    return dict(value)
                 elif db_type == 'list':
-                    value = list(item for pair in value for item in pair)
+                    return list(item for pair in value for item in pair)
 
             else:
 
@@ -343,12 +347,21 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                     for subvalue in value)
 
                 # "list" may be used for SetField.
-                if db_type == 'list':
-                    value = list(value)
+                if db_type in 'list':
+                    return list(value)
                 elif db_type == 'set':
                     # assert field_kind != 'ListField'
-                    value = set(value)
+                    return set(value)
 
+            # Pickled formats may be used for all collection fields,
+            # the fields "natural" type is serialized (something
+            # concrete is needed, pickle can't handle generators :-)
+            if db_type == 'bytes':
+                return pickle.dumps(field._type(value), protocol=2)
+            elif db_type == 'string':
+                return pickle.dumps(field._type(value))
+
+        # If nothing matched, pass the generator to the back-end.
         return value
 
     def value_from_db_collection(self, value, field, field_kind, db_type):
@@ -365,17 +378,21 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         subkind = subfield.get_internal_type()
         db_subtype = self.connection.creation.nonrel_db_type(subfield)
 
+        # Unpickle (a dict) if a serialized storage is used.
+        if db_type == 'bytes' or db_type == 'string':
+            value = pickle.loads(value)
+
         if field_kind == 'DictField':
 
-            # Generator yielding pairs with deconverted values,
-            # from a dict or flat list with keys values interleaved.
+            # Generator yielding pairs with deconverted values, the
+            # "list" db_type stores keys and values interleaved.
             if db_type == 'list':
                 value = zip(value[::2], value[1::2])
             else:
                 value = value.iteritems()
 
             # DictField needs to hold a dict.
-            value = dict(
+            return dict(
                 (key, self.value_from_db(subvalue, subfield,
                                          subkind, db_subtype))
                 for key, subvalue in value)
@@ -390,16 +407,17 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
             # The value will be available from the field without any
             # further processing and it has to have the right type.
             if field_kind == 'ListField':
-                value = list(value)
+                return list(value)
             elif field_kind == 'SetField':
-                value = set(value)
+                return set(value)
 
-        return value
+            # A new field kind? Maybe it can take a generator.
+            return value
 
     def value_for_db_model(self, value, field, field_kind, db_type, lookup):
         """
         Converts a field => value mapping received from an
-        EmbeddedModelField to a dict or list for storage.
+        EmbeddedModelField the format chosen for the field storage.
 
         The embedded instance fields' values are also converted /
         deconverted using value_for/from_db, so any back-end
@@ -411,13 +429,18 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
         on EmbeddedModelFields or do some low-level processing using
         values held by their fields).
 
-        Returns (field.column, value) pairs as a dict or a
-        once-flattened list, possibly augmented with model info (to be
-        able to deconvert the embedded instance for untyped fields).
-        Note that just a single level of the list is flattened, so it
-        still may be nested (when the embedded instance holds
-        collection fields). If an unknown db_type is used a generator
-        yielding such pairs will be returned.
+        Returns (field.column, value) pairs, possibly augmented with
+        model info (to be able to deconvert the embedded instance for
+        untyped fields) encoded according to the db_type chosen.
+        If "dict" db_type is given a Python dict is returned.
+        If "list db_type is chosen a list with columns and values
+        interleaved will be returned. Note that just a single level of
+        the list is flattened, so it still may be nested -- when the
+        embedded instance holds other embedded models or collections).
+        Using "bytes" or "string" pickles the mapping using pickle
+        protocol 0 or 2 respectively.
+        If an unknown db_type is used a generator yielding (column,
+        value) pairs with values converted will be returned.
 
         TODO: How should EmbeddedModelField lookups work?
         """
@@ -434,31 +457,37 @@ class NonrelDatabaseOperations(BaseDatabaseOperations):
                                self._db_subtype(field, subfield), lookup))
             for subfield, subvalue in value.iteritems())
 
-        # Process "dict" or "list" (with columns and their values
-        # interleaved) storage types, or return a generator.
+        # Cast to a dict, interleave columns with values on a list,
+        # serialize, or return a generator.
         if db_type == 'dict':
             value = dict(value)
         elif db_type == 'list':
             value = list(item for pair in value for item in pair)
+        elif db_type == 'bytes':
+            value = pickle.dumps(dict(value), protocol=2)
+        elif db_type == 'string':
+            value = pickle.dumps(dict(value))
 
         return value
 
     def value_from_db_model(self, value, field, field_kind, db_type):
         """
-        Deconverts values stored for embedded model fields.
+        Deconverts values stored for EmbeddedModelFields.
 
         Embedded instances are stored as a (column, value) pairs in a
-        dict or single-flattened list.
+        dict, a single-flattened list or a serialized dict.
 
         Returns a tuple with model class and field.attname => value
         mapping.
         """
 
-        # List storage, separate keys from values and create a dict.
+        # Separate keys from values and create a dict or unpickle one.
         if db_type == 'list':
             value = dict(zip(value[::2], value[1::2]))
+        elif db_type == 'bytes' or db_type == 'string':
+            value = pickle.loads(value)
 
-        # Let untyped fields determine what model.
+        # Let untyped fields determine the embedded instance's model.
         embedded_model = field.model_for_data(value)
 
         # Deconvert fields' values and prepare a dict that can be used

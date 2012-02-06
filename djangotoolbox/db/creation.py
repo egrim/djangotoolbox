@@ -3,15 +3,15 @@ from django.db.backends.creation import BaseDatabaseCreation
 
 class NonrelDatabaseCreation(BaseDatabaseCreation):
 
-    # "Types" used by back-end conversion routines to decide how to
+    # "Types" used by database conversion methods to decide how to
     # convert data for or from the database. Type is understood here
     # a bit differently than in vanilla Django -- it should be read
-    # as an identifier of an encoding / decoding procedure to use,
-    # rather than just a database column type.
+    # as an identifier of an encoding / decoding procedure rather than
+    # just a database column type.
     data_types = {
 
-        # NoSQL databases usually have specific concepts of keys. For
-        # example, GAE has the db.Key class, MongoDB driver only allows
+        # NoSQL databases often have specific concepts of entity keys.
+        # For example, GAE has the db.Key class, MongoDB likes to use
         # ObjectIds, Redis uses strings, while Cassandra supports
         # different types (including binary data).
         'AutoField':                  'key',
@@ -47,11 +47,17 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         'URLField':                   'string',
         'XMLField':                   'string',
 
-        # You may use "list" for SetFields, or even DictField and
-        # EmbeddedModelField (if your database supports nested lists),
-        # but note that the same set or dict may be represented by
-        # different lists (with elements in different order), so order
-        # of such data is undetermined.
+        # You may use "list" for SetField, or even DictField and
+        # EmbeddedModelField (if your database supports nested lists).
+        # All following fields also support "string" and "bytes" as
+        # their storage types -- which work by serializing using pickle
+        # protocol 0 or 2 respectively.
+        # Please note that if you can't support the "natural" storage
+        # type then the order of field values will be undetermined, and
+        # lookups or filters may not work as specified (e.g. the same
+        # set or dict may be represented by different lists, with
+        # elements in different order, so the same two instances may
+        # compare one way or the other).
         'AbstractIterableField':      'list',
         'ListField':                  'list',
         'SetField':                   'set',
@@ -75,8 +81,9 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         the original Django's db_type logic. This should be used
         instead of Field.db_type.
 
-        Note: we can't simply redefine db_type here because we may want
-        to override db_type a field may return directly.
+        Note: we can't simply redefine db_type here because we want
+        to override db_type a field returns directly, without resorting
+        to DatabaseCreation.db_type.
 
         :param field: A field we want to know the storage type of
 
@@ -90,11 +97,10 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
               -- and contrib/gis (defines its own geo_db_type method).
 
         TODO: related_db_type and related changes are now only needed
-              for "legacy" storage methods (which is no longer a must
-              too any longer). At some point also remove all instances
+              for "legacy" storage methods (this dependence can also be
+              easily removed). At some point also remove all instances
               of "RelatedAutoField".
         """
-        print 'ndbt', field.model 
         if field.primary_key or field.rel is not None:
             return 'key'
         return field.db_type(connection=self.connection)
@@ -107,5 +113,8 @@ class NonrelDatabaseCreation(BaseDatabaseCreation):
         return [], {}
 
     def sql_indexes_for_model(self, model, style):
-        """Creates all indexes needed for local fields of a model."""
+        """
+        Creates all indexes needed for local (not inherited) fields of
+        a model.
+        """
         return []
